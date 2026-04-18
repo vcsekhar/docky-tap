@@ -28,10 +28,10 @@ struct ContextAction: Identifiable {
 }
 
 struct ContextActionMenuPresenter: NSViewRepresentable {
-    let actions: [ContextAction]
+    let actionProvider: (NSEvent.ModifierFlags) -> [ContextAction]
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(actions: actions)
+        Coordinator(actionProvider: actionProvider)
     }
 
     func makeNSView(context: Context) -> AnchorView {
@@ -39,7 +39,7 @@ struct ContextActionMenuPresenter: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: AnchorView, context: Context) {
-        context.coordinator.update(actions: actions)
+        context.coordinator.update(actionProvider: actionProvider)
         DispatchQueue.main.async {
             context.coordinator.installIfNeeded(for: nsView)
         }
@@ -52,21 +52,21 @@ struct ContextActionMenuPresenter: NSViewRepresentable {
     final class Coordinator: NSObject {
         private weak var anchorView: NSView?
         private var eventMonitor: Any?
-        private var actions: [ContextAction]
+        private var actionProvider: (NSEvent.ModifierFlags) -> [ContextAction]
 
-        init(actions: [ContextAction]) {
-            self.actions = actions
+        init(actionProvider: @escaping (NSEvent.ModifierFlags) -> [ContextAction]) {
+            self.actionProvider = actionProvider
             super.init()
         }
 
-        func update(actions: [ContextAction]) {
-            self.actions = actions
+        func update(actionProvider: @escaping (NSEvent.ModifierFlags) -> [ContextAction]) {
+            self.actionProvider = actionProvider
         }
 
         func installIfNeeded(for anchorView: NSView) {
             self.anchorView = anchorView
 
-            guard !actions.isEmpty else {
+            guard !actionProvider([]).isEmpty else {
                 uninstall()
                 return
             }
@@ -87,7 +87,7 @@ struct ContextActionMenuPresenter: NSViewRepresentable {
         }
 
         private func handleContextClick(_ event: NSEvent) -> NSEvent? {
-            guard let view = anchorView, let window = view.window, event.window === window, !actions.isEmpty else {
+            guard let view = anchorView, let window = view.window, event.window === window else {
                 return event
             }
 
@@ -102,7 +102,12 @@ struct ContextActionMenuPresenter: NSViewRepresentable {
                 return event
             }
 
-            let menu = buildMenu()
+            let actions = actionProvider(event.modifierFlags)
+            guard !actions.isEmpty else {
+                return event
+            }
+
+            let menu = buildMenu(actions: actions)
             popUpCartouche(menu: menu, in: view)
             return nil
         }
@@ -125,7 +130,7 @@ struct ContextActionMenuPresenter: NSViewRepresentable {
             menu.popUp(positioning: menu.items.last, at: anchor, in: view)
         }
 
-        private func buildMenu() -> NSMenu {
+        private func buildMenu(actions: [ContextAction]) -> NSMenu {
             let menu = NSMenu()
             for action in actions {
                 switch action.kind {

@@ -27,42 +27,47 @@ struct FolderPopoverView: View {
     }
 
     var body: some View {
-        Group {
-            if case .unreadable = snapshot {
-                unreadableState
-            } else if items.isEmpty {
-                emptyState
-            } else {
-                ScrollView(showsIndicators: false) {
-                    LazyVGrid(columns: columns, spacing: 8) {
-                        ForEach(items, id: \.self) { itemURL in
-                            Button {
-                                open(itemURL)
-                            } label: {
-                                FolderPopoverItemView(url: itemURL)
-                            }
-                            .buttonStyle(.plain)
-                            .background {
-                                ContextActionMenuPresenter(actions: [
+        bodyContent
+            .task(id: reloadKey) {
+                snapshot = FolderAccessService.shared.snapshot(of: tile.url)
+            }
+            .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private var bodyContent: some View {
+        if case .unreadable = snapshot {
+            unreadableState
+        } else if items.isEmpty {
+            emptyState
+        } else {
+            ScrollView(showsIndicators: false) {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(items, id: \.self) { itemURL in
+                        Button {
+                            open(itemURL)
+                        } label: {
+                            FolderPopoverItemView(url: itemURL)
+                        }
+                        .buttonStyle(.plain)
+                        .background {
+                            ContextActionMenuPresenter { _ in
+                                [
                                     .action("Reveal in Finder") {
                                         revealInFinder(itemURL)
                                     },
                                     .action("Open in Finder") {
                                         openInFinder(itemURL)
                                     }
-                                ])
+                                ]
                             }
                         }
                     }
-                    .padding(20)
                 }
-                .frame(width: 920, height: min(max(popoverHeight, 400), 840))
+                .padding(20)
             }
+            .frame(width: 920, height: min(max(popoverHeight, 400), 840))
         }
-        .task(id: reloadKey) {
-            snapshot = FolderAccessService.shared.snapshot(of: tile.url)
-        }
-        .background(.ultraThinMaterial)
     }
 
     private var items: [URL] {

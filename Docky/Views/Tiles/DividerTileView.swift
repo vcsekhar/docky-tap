@@ -14,15 +14,17 @@ struct DividerTileView: View {
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .background {
-                ContextActionMenuPresenter(actions: [
-                    .action("Settings...") {
-                        (NSApp.delegate as? AppDelegate)?.showSettingsWindow(nil)
-                    },
-                    .divider,
-                    .action("Quit Docky", isDestructive: true) {
-                        NSApp.terminate(nil)
-                    }
-                ])
+                ContextActionMenuPresenter { _ in
+                    [
+                        .action("Settings...") {
+                            (NSApp.delegate as? AppDelegate)?.showSettingsWindow(nil)
+                        },
+                        .divider,
+                        .action("Quit Docky", isDestructive: true) {
+                            NSApp.terminate(nil)
+                        }
+                    ]
+                }
             }
     }
 }

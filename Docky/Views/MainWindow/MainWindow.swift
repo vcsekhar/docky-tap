@@ -8,6 +8,36 @@
 import AppKit
 import Combine
 
+final class MainWindowContainerView: NSView {
+    static let contentPadding: CGFloat = 2
+
+    private let contentView = MainWindowView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        wantsLayer = true
+
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(contentView)
+
+        NSLayoutConstraint.activate([
+            contentView.topAnchor.constraint(equalTo: topAnchor, constant: Self.contentPadding),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.contentPadding),
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.contentPadding),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.contentPadding),
+        ])
+    }
+}
+
 final class MainWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -61,14 +91,15 @@ final class MainWindow: NSWindow {
     private func applyFrame() {
         let screenBounds = NSScreen.main?.frame ?? .zero
         let iconHeight = dockSettings.magnification ? dockSettings.largeSize : dockSettings.tileSize
-        let height = iconHeight + preferences.tileVerticalPadding * 2
+        let contentPadding = MainWindowContainerView.contentPadding
+        let height = iconHeight + preferences.tileVerticalPadding * 2 + contentPadding * 2
 
         let contentWidth = TileContainerView.contentWidth(
             tiles: tileStore.tiles,
             tileSize: dockSettings.tileSize,
             tileSpacing: preferences.tileSpacing
         )
-        let width = max(minimumWidth, contentWidth)
+        let width = max(minimumWidth, contentWidth) + contentPadding * 2
 
         setFrame(
             CGRect(

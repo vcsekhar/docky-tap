@@ -52,6 +52,43 @@ final class WorkspaceService: ObservableObject {
         runningByBundleID[bundleIdentifier] != nil
     }
 
+    func activateOrOpen(bundleIdentifier: String) {
+        if let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first {
+            runningApp.activate(options: [.activateAllWindows])
+            return
+        }
+
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return
+        }
+
+        NSWorkspace.shared.openApplication(
+            at: appURL,
+            configuration: NSWorkspace.OpenConfiguration(),
+            completionHandler: nil
+        )
+    }
+
+    func revealApplicationInFinder(bundleIdentifier: String) {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            return
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([appURL])
+    }
+
+    func quit(bundleIdentifier: String, force: Bool = false) {
+        guard let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first else {
+            return
+        }
+
+        if force {
+            runningApp.forceTerminate()
+        } else {
+            runningApp.terminate()
+        }
+    }
+
     func refresh() {
         let regular = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         var newMap: [String: RunningApp] = [:]

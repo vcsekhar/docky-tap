@@ -16,8 +16,12 @@ struct TileView: View {
     @State private var isFolderPopoverPresented = false
     @State private var folderSnapshot: FolderContentsSnapshot = .loaded([])
 
-    private var contextActions: [ContextAction] {
+    private static let finderBundleIdentifier = "com.apple.finder"
+
+    private func contextActions(modifierFlags: NSEvent.ModifierFlags) -> [ContextAction] {
         switch tile.content {
+        case .app(let app):
+            return appContextActions(for: app, modifierFlags: modifierFlags)
         case .folder(let folder):
             return [
                 .action("Open in Finder") {
@@ -45,7 +49,7 @@ struct TileView: View {
                     }
                 }
             ]
-        case .app, .widget, .spacer, .divider:
+        case .widget, .spacer, .divider:
             return []
         }
     }
@@ -62,7 +66,7 @@ struct TileView: View {
                 isFolderPopoverPresented = false
             }
             .background {
-                ContextActionMenuPresenter(actions: contextActions)
+                ContextActionMenuPresenter(actionProvider: contextActions(modifierFlags:))
 
                 if let tooltipTitle {
                     TileTooltipPopoverPresenter(
@@ -126,6 +130,9 @@ struct TileView: View {
 
     private func handleTap() {
         switch tile.content {
+        case .app(let app):
+            isTooltipPresented = false
+            WorkspaceService.shared.activateOrOpen(bundleIdentifier: app.bundleIdentifier)
         case .folder(let folder):
             isTooltipPresented = false
 
@@ -140,9 +147,51 @@ struct TileView: View {
             Task {
                 _ = await AppleScriptService.shared.openTrash()
             }
-        case .app, .widget, .spacer, .divider:
+        case .widget, .spacer, .divider:
             return
         }
+    }
+
+    private func appContextActions(
+        for app: AppTile,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> [ContextAction] {
+        guard !app.bundleIdentifier.isEmpty else {
+            return []
+        }
+
+        let workspace = WorkspaceService.shared
+        let isRunning = workspace.isRunning(bundleIdentifier: app.bundleIdentifier)
+        let isPinned = tile.id.hasPrefix("pinned:")
+        let canRemoveFromDock = isPinned && app.bundleIdentifier != Self.finderBundleIdentifier
+        let useForceQuit = modifierFlags.contains(.option)
+        var actions: [ContextAction] = [
+            .action("Open") {
+                workspace.activateOrOpen(bundleIdentifier: app.bundleIdentifier)
+            },
+            .action("Show in Finder") {
+                workspace.revealApplicationInFinder(bundleIdentifier: app.bundleIdentifier)
+            }
+        ]
+
+        if canRemoveFromDock {
+            actions.append(.divider)
+            actions.append(.action("Remove from Dock") {
+                _ = DockEditorService.shared.removePinnedApp(bundleIdentifier: app.bundleIdentifier)
+            })
+        }
+
+        if isRunning && app.bundleIdentifier != Self.finderBundleIdentifier {
+            actions.append(.divider)
+            actions.append(.action(
+                useForceQuit ? "Force Quit" : "Quit",
+                isDestructive: useForceQuit
+            ) {
+                workspace.quit(bundleIdentifier: app.bundleIdentifier, force: useForceQuit)
+            })
+        }
+
+        return actions
     }
 
 }
