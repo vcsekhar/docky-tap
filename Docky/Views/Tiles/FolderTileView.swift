@@ -13,7 +13,11 @@ struct FolderTileView: View {
     @State private var preview: [URL] = []
 
     var body: some View {
-        content
+        VStack(spacing: 2) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            indicatorPlaceholder
+        }
             .task(id: reloadKey) {
                 preview = FolderAccessService.shared.recentContents(of: tile.url, limit: 3)
             }
@@ -69,6 +73,12 @@ struct FolderTileView: View {
             }
         }
         .frame(width: size.width, height: size.height, alignment: .center)
+    }
+
+    private var indicatorPlaceholder: some View {
+        Circle()
+            .frame(width: 4, height: 4)
+            .foregroundStyle(.clear)
     }
 
     private var reloadKey: String {
