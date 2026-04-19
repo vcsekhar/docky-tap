@@ -7,7 +7,7 @@ import SwiftUI
 
 struct TileContainerView: View {
     static let horizontalPadding: CGFloat = 8
-    static let dividerWidth: CGFloat = 20
+    static let dividerWidth: CGFloat = 40
 
     @ObservedObject private var store = TileStore.shared
     @ObservedObject private var dockSettings = DockSettingsService.shared
