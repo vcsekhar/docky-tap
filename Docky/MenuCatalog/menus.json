@@ -14,15 +14,7 @@
             { "type": "action", "action": "app.show-in-finder" }
           ]
         },
-        {
-          "type": "divider",
-          "when": {
-            "all": [
-              { "flag": "isRunning" },
-              { "not": { "flag": "isFinder" } }
-            ]
-          }
-        },
+        { "type": "divider" },
         { "type": "action", "action": "app.show-all-windows" },
         {
           "type": "action",
