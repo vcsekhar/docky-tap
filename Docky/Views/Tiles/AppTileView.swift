@@ -19,11 +19,8 @@ struct AppTileView: View {
     }
 
     var body: some View {
-        VStack(spacing: 2) {
-            iconView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            runningIndicator
-        }
+        iconView
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var iconView: some View {
@@ -32,17 +29,6 @@ struct AppTileView: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
             .opacity(isHidden ? 0.5 : 1)
-    }
-
-    @ViewBuilder
-    private var runningIndicator: some View {
-        if isRunning {
-            Circle()
-                .frame(width: 4, height: 4)
-                .foregroundStyle(.primary.opacity(0.9))
-        } else {
-            Color.clear.frame(height: 4)
-        }
     }
 
     private var icon: NSImage {

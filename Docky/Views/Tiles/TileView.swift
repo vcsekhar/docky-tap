@@ -12,6 +12,7 @@ import SwiftUI
 struct TileView: View {
     let tile: Tile
     @ObservedObject private var preferences = DockyPreferences.shared
+    @ObservedObject private var workspace = WorkspaceService.shared
     @State private var isHovering = false
     @State private var isTooltipPresented = false
     @State private var isFolderPopoverPresented = false
@@ -60,6 +61,10 @@ struct TileView: View {
         content
             .padding(.vertical, verticalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .overlay(alignment: .bottom) {
+                runningIndicator
+                    .padding(.bottom, 2)
+            }
             .contentShape(Rectangle())
             .onHover(perform: updateHoverState)
             .onTapGesture(perform: handleTap)
@@ -96,6 +101,16 @@ struct TileView: View {
                     )
                 }
             }
+    }
+
+    @ViewBuilder
+    private var runningIndicator: some View {
+        if case .app(let app) = tile.content,
+           workspace.isRunning(bundleIdentifier: app.bundleIdentifier) {
+            Circle()
+                .frame(width: 4, height: 4)
+                .foregroundStyle(.primary.opacity(0.9))
+        }
     }
 
     private var verticalPadding: CGFloat {
