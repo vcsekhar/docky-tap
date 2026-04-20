@@ -215,7 +215,7 @@ struct TileContainerView: View {
         let didChangeOrder = finalPinnedTileIDs != pinnedTileIDs
 
         if didChangeOrder {
-            _ = DockEditorService.shared.setPinnedItemOrder(ids: finalPinnedTileIDs)
+            store.setPinnedTileOrder(ids: finalPinnedTileIDs)
         }
 
         withAnimation(tileMutationAnimation) {

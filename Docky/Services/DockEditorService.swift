@@ -72,13 +72,9 @@ final class DockEditorService {
                 return false
             }
 
-            let appsByID = Dictionary(uniqueKeysWithValues: apps.compactMap { entry in
-                pinnedItemID(in: entry).map { ($0, entry) }
+            let appsByID = Dictionary(uniqueKeysWithValues: apps.enumerated().map { index, entry in
+                (pinnedItemID(in: entry, at: index), entry)
             })
-
-            guard appsByID.count == apps.count else {
-                return false
-            }
 
             let orderedApps = ids.compactMap { appsByID[$0] }
             guard orderedApps.count == apps.count else {
@@ -158,8 +154,27 @@ final class DockEditorService {
             ?? url.flatMap { Bundle(url: $0)?.bundleIdentifier }
     }
 
-    private func pinnedItemID(in entry: [String: Any]) -> String? {
-        (entry["GUID"] as? NSNumber)?.stringValue
+    private func pinnedItemID(in entry: [String: Any], at index: Int) -> String {
+        if let guid = (entry["GUID"] as? NSNumber)?.stringValue {
+            return guid
+        }
+
+        let tileType = (entry["tile-type"] as? String) ?? "unknown"
+        let tileData = entry["tile-data"] as? [String: Any] ?? [:]
+        let fileData = tileData["file-data"] as? [String: Any]
+        let urlString = fileData?["_CFURLString"] as? String
+        let bundleIdentifier = tileData["bundle-identifier"] as? String
+        let label = tileData["file-label"] as? String
+
+        let signature = [tileType, bundleIdentifier, urlString, label]
+            .compactMap { $0?.replacingOccurrences(of: ":", with: "_") }
+            .joined(separator: ":")
+
+        if signature.isEmpty {
+            return "persistent-apps:\(index):\(tileType)"
+        }
+
+        return "persistent-apps:\(index):\(signature)"
     }
 
     private func makePinnedAppEntry(bundleIdentifier: String, plist: [String: Any]) -> [String: Any]? {

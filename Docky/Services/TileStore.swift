@@ -60,8 +60,13 @@ final class TileStore: ObservableObject {
         }
         let apps = (plist["persistent-apps"] as? [[String: Any]]) ?? []
         let others = (plist["persistent-others"] as? [[String: Any]]) ?? []
-        pinnedTiles = apps.compactMap(Self.parse(entry:))
-        otherTiles = others.compactMap(Self.parse(entry:))
+        let refreshedPinnedTiles = apps.enumerated().compactMap { index, entry in
+            Self.parse(entry: entry, fallbackID: Self.fallbackTileID(for: entry, at: index, section: "persistent-apps"))
+        }
+        pinnedTiles = mergedPinnedTiles(refreshed: refreshedPinnedTiles)
+        otherTiles = others.enumerated().compactMap { index, entry in
+            Self.parse(entry: entry, fallbackID: Self.fallbackTileID(for: entry, at: index, section: "persistent-others"))
+        }
         rebuildTiles()
     }
 
@@ -69,7 +74,36 @@ final class TileStore: ObservableObject {
         pinnedTiles.contains { $0.id == tileID }
     }
 
+    func setPinnedTileOrder(ids: [String]) {
+        guard ids.count == pinnedTiles.count else {
+            return
+        }
+
+        let tilesByID = Dictionary(uniqueKeysWithValues: pinnedTiles.map { ($0.id, $0) })
+        let reorderedTiles = ids.compactMap { tilesByID[$0] }
+        guard reorderedTiles.count == pinnedTiles.count else {
+            return
+        }
+
+        pinnedTiles = reorderedTiles
+        rebuildTiles()
+    }
+
     private static let finderBundleID = "com.apple.finder"
+
+    private func mergedPinnedTiles(refreshed: [Tile]) -> [Tile] {
+        guard !pinnedTiles.isEmpty else {
+            return refreshed
+        }
+
+        let refreshedTilesByID = Dictionary(uniqueKeysWithValues: refreshed.map { ($0.id, $0) })
+        var mergedTiles: [Tile] = pinnedTiles.compactMap { existingTile in
+            refreshedTilesByID[existingTile.id]
+        }
+        let existingIDs = Set(mergedTiles.map(\.id))
+        mergedTiles.append(contentsOf: refreshed.filter { !existingIDs.contains($0.id) })
+        return mergedTiles
+    }
 
     private func rebuildTiles() {
         let pinnedWithoutFinder = pinnedTiles.filter { !Self.isFinder($0) }
@@ -175,10 +209,10 @@ final class TileStore: ObservableObject {
 
     // MARK: - Parsing plist entries
 
-    private static func parse(entry: [String: Any]) -> Tile? {
+    private static func parse(entry: [String: Any], fallbackID: String) -> Tile? {
         let tileType = entry["tile-type"] as? String
         let tileData = entry["tile-data"] as? [String: Any] ?? [:]
-        let guid = (entry["GUID"] as? NSNumber)?.stringValue ?? UUID().uuidString
+        let guid = (entry["GUID"] as? NSNumber)?.stringValue ?? fallbackID
 
         switch tileType {
         case "file-tile":
@@ -219,6 +253,25 @@ final class TileStore: ObservableObject {
     private static func inferBundleIdentifier(from url: URL?) -> String? {
         guard let url else { return nil }
         return Bundle(url: url)?.bundleIdentifier
+    }
+
+    private static func fallbackTileID(for entry: [String: Any], at index: Int, section: String) -> String {
+        let tileType = (entry["tile-type"] as? String) ?? "unknown"
+        let tileData = entry["tile-data"] as? [String: Any] ?? [:]
+        let fileData = tileData["file-data"] as? [String: Any]
+        let urlString = fileData?["_CFURLString"] as? String
+        let bundleIdentifier = tileData["bundle-identifier"] as? String
+        let label = tileData["file-label"] as? String
+
+        let signature = [tileType, bundleIdentifier, urlString, label]
+            .compactMap { $0?.replacingOccurrences(of: ":", with: "_") }
+            .joined(separator: ":")
+
+        if signature.isEmpty {
+            return "\(section):\(index):\(tileType)"
+        }
+
+        return "\(section):\(index):\(signature)"
     }
 
     // MARK: - Running-but-not-pinned tiles
