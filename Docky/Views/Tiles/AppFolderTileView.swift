@@ -60,7 +60,7 @@ struct AppFolderTileView: View {
                         .offset(
                             x: (
                                 (CGFloat(groupedOpenedAppSpan) * DockSettingsService.shared.tileSize) / 2
-                            ) - DockSettingsService.shared.tileSize / 2
+                            ) - (DockSettingsService.shared.tileSize / 2) - 2
                         )
                 )
         }
@@ -197,6 +197,145 @@ struct AppFolderPopoverView: View {
         let gridHeight = CGFloat(rowCount) * itemHeight + CGFloat(max(rowCount - 1, 0)) * itemSpacing
         let height = min(gridHeight + contentPadding * 2 + headerHeight + 16, maxHeight)
         return CGSize(width: width, height: height)
+    }
+}
+
+struct AppFolderListMenuPresenter: NSViewRepresentable {
+    let tile: AppFolderTile
+    @Binding var isPresented: Bool
+    let preferredEdge: NSRectEdge
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(tile: tile, isPresented: $isPresented, preferredEdge: preferredEdge)
+    }
+
+    func makeNSView(context: Context) -> AppFolderPopoverAnchorView {
+        AppFolderPopoverAnchorView()
+    }
+
+    func updateNSView(_ nsView: AppFolderPopoverAnchorView, context: Context) {
+        context.coordinator.update(tile: tile, isPresented: $isPresented, preferredEdge: preferredEdge)
+
+        if isPresented {
+            DispatchQueue.main.async {
+                context.coordinator.show(relativeTo: nsView)
+            }
+        } else {
+            context.coordinator.close()
+        }
+    }
+
+    static func dismantleNSView(_ nsView: AppFolderPopoverAnchorView, coordinator: Coordinator) {
+        coordinator.close()
+    }
+
+    final class Coordinator: NSObject {
+        private var tile: AppFolderTile
+        private var isPresented: Binding<Bool>
+        private var preferredEdge: NSRectEdge
+        private weak var anchorView: NSView?
+        private var isShowing = false
+        private var isInterruptingAutohide = false
+
+        init(tile: AppFolderTile, isPresented: Binding<Bool>, preferredEdge: NSRectEdge) {
+            self.tile = tile
+            self.isPresented = isPresented
+            self.preferredEdge = preferredEdge
+            super.init()
+        }
+
+        func update(tile: AppFolderTile, isPresented: Binding<Bool>, preferredEdge: NSRectEdge) {
+            self.tile = tile
+            self.isPresented = isPresented
+            self.preferredEdge = preferredEdge
+        }
+
+        func show(relativeTo view: NSView) {
+            guard view.window != nil, !isShowing else { return }
+
+            anchorView = view
+            isShowing = true
+            beginAutohideInterruption(for: view)
+            popUp(menu: buildMenu(), in: view)
+            endAutohideInterruption()
+            isShowing = false
+
+            DispatchQueue.main.async { [isPresented] in
+                guard isPresented.wrappedValue else { return }
+                isPresented.wrappedValue = false
+            }
+        }
+
+        func close() {
+            endAutohideInterruption()
+            isShowing = false
+        }
+
+        private func buildMenu() -> NSMenu {
+            let menu = NSMenu(title: tile.displayName)
+
+            for app in tile.apps {
+                let item = NSMenuItem(title: app.displayName, action: #selector(openApp(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = app.bundleIdentifier
+                item.image = listMenuIcon(for: app.bundleIdentifier)
+                menu.addItem(item)
+            }
+
+            if !menu.items.isEmpty {
+                menu.addItem(.separator())
+            }
+
+            let openAll = NSMenuItem(title: "Open All", action: #selector(openAllApps), keyEquivalent: "")
+            openAll.target = self
+            openAll.isEnabled = !tile.apps.isEmpty
+            menu.addItem(openAll)
+            return menu
+        }
+
+        private func listMenuIcon(for bundleIdentifier: String) -> NSImage {
+            let icon = IconCacheService.shared.icon(forBundleIdentifier: bundleIdentifier).copy() as? NSImage
+                ?? IconCacheService.shared.icon(forBundleIdentifier: bundleIdentifier)
+            icon.size = NSSize(width: 16, height: 16)
+            return icon
+        }
+
+        @objc private func openApp(_ sender: NSMenuItem) {
+            guard let bundleIdentifier = sender.representedObject as? String else { return }
+            WorkspaceService.shared.activateOrOpen(bundleIdentifier: bundleIdentifier)
+        }
+
+        @objc private func openAllApps() {
+            for app in tile.apps {
+                WorkspaceService.shared.activateOrOpen(bundleIdentifier: app.bundleIdentifier)
+            }
+        }
+
+        private func popUp(menu: NSMenu, in view: NSView) {
+            let selector = NSSelectorFromString("_popUpMenuRelativeToRect:inView:preferredEdge:")
+            if menu.responds(to: selector) {
+                typealias Fn = @convention(c) (NSMenu, Selector, NSRect, NSView?, NSRectEdge) -> Void
+                let imp = menu.method(for: selector)
+                let fn = unsafeBitCast(imp, to: Fn.self)
+                fn(menu, selector, view.bounds, view, preferredEdge)
+                return
+            }
+
+            menu.update()
+            menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.midX - menu.size.width / 2, y: view.bounds.maxY), in: view)
+        }
+
+        private func beginAutohideInterruption(for view: NSView) {
+            guard !isInterruptingAutohide else { return }
+            (view.window as? MainWindow)?.beginInteraction()
+            isInterruptingAutohide = true
+        }
+
+        private func endAutohideInterruption() {
+            guard isInterruptingAutohide else { return }
+            (anchorView?.window as? MainWindow)?.endInteraction()
+            isInterruptingAutohide = false
+        }
     }
 }
 

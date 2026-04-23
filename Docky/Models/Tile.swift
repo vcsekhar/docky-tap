@@ -46,6 +46,19 @@ struct AppFolderTile: Equatable {
     let identifier: String
     let displayName: String
     let apps: [AppTile]
+    let contentViewMode: FolderTileContentViewMode
+
+    nonisolated init(
+        identifier: String,
+        displayName: String,
+        apps: [AppTile],
+        contentViewMode: FolderTileContentViewMode = .grid
+    ) {
+        self.identifier = identifier
+        self.displayName = displayName
+        self.apps = apps
+        self.contentViewMode = contentViewMode
+    }
 
     nonisolated var bundleIdentifiers: [String] {
         apps.map(\.bundleIdentifier)

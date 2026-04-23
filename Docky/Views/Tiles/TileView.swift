@@ -21,6 +21,7 @@ struct TileView: View {
     @State private var isFolderPopoverPresented = false
     @State private var isFolderListMenuPresented = false
     @State private var isAppFolderPopoverPresented = false
+    @State private var isAppFolderListMenuPresented = false
     @State private var isContextMenuPresented = false
     @State private var folderSnapshot: FolderContentsSnapshot = .loaded([])
     @State private var lastFolderPopoverDismissedAt: TimeInterval = 0
@@ -150,6 +151,14 @@ struct TileView: View {
         return TileStore.shared.folderContentViewMode(tileID: tile.id, folderURL: folder.url)
     }
 
+    private var appFolderContentViewMode: FolderTileContentViewMode {
+        guard case .appFolder = tile.content else {
+            return .grid
+        }
+
+        return TileStore.shared.appFolderContentViewMode(tileID: tile.id)
+    }
+
     private var customDockyTileActions: [ContextAction] {
         guard isDockyPinnedTile || isDockyTrailingTile else {
             return []
@@ -190,6 +199,15 @@ struct TileView: View {
         }
 
         if case .appFolder = tile.content {
+            actions.append(.divider)
+            actions.append(.submenu("View Content as", children: [
+                .action("Grid", isOn: appFolderContentViewMode == .grid) {
+                    TileStore.shared.setAppFolderContentViewMode(tileID: tile.id, mode: .grid)
+                },
+                .action("List", isOn: appFolderContentViewMode == .list) {
+                    TileStore.shared.setAppFolderContentViewMode(tileID: tile.id, mode: .list)
+                }
+            ]))
             actions.append(.divider)
             actions.append(.action("Rename Folder...") {
                 TileStore.shared.presentRenameAppFolderPrompt(tileID: tile.id)
@@ -235,6 +253,7 @@ struct TileView: View {
                 isFolderPopoverPresented = false
                 isFolderListMenuPresented = false
                 isAppFolderPopoverPresented = false
+                isAppFolderListMenuPresented = false
                 isContextMenuPresented = false
             }
             .onChange(of: isFolderPopoverPresented) { _, isPresented in
@@ -243,6 +262,9 @@ struct TileView: View {
                 lastFolderPopoverDismissedAt = Date.timeIntervalSinceReferenceDate
             }
             .onChange(of: isFolderListMenuPresented) { _, _ in
+                updateTooltipPresentation()
+            }
+            .onChange(of: isAppFolderListMenuPresented) { _, _ in
                 updateTooltipPresentation()
             }
             .background {
@@ -289,11 +311,26 @@ struct TileView: View {
                 }
 
                 if case .appFolder(let folder) = tile.content {
-                    AppFolderPopoverPresenter(
-                        tile: folder,
-                        isPresented: $isAppFolderPopoverPresented,
-                        preferredEdge: inwardPopoverEdge
+                    let presentedFolder = AppFolderTile(
+                        identifier: folder.identifier,
+                        displayName: folder.displayName,
+                        apps: folder.apps,
+                        contentViewMode: appFolderContentViewMode
                     )
+
+                    if appFolderContentViewMode == .list {
+                        AppFolderListMenuPresenter(
+                            tile: presentedFolder,
+                            isPresented: $isAppFolderListMenuPresented,
+                            preferredEdge: inwardPopoverEdge
+                        )
+                    } else {
+                        AppFolderPopoverPresenter(
+                            tile: presentedFolder,
+                            isPresented: $isAppFolderPopoverPresented,
+                            preferredEdge: inwardPopoverEdge
+                        )
+                    }
                 }
             }
     }
@@ -603,6 +640,7 @@ struct TileView: View {
             && !isFolderPopoverPresented
             && !isFolderListMenuPresented
             && !isAppFolderPopoverPresented
+            && !isAppFolderListMenuPresented
             && !isContextMenuPresented
     }
 
@@ -616,6 +654,13 @@ struct TileView: View {
             _ = WorkspaceService.shared.restoreMinimizedWindow(window)
         case .appFolder:
             isTooltipPresented = false
+
+            if appFolderContentViewMode == .list {
+                isAppFolderPopoverPresented = false
+                guard !isAppFolderListMenuPresented else { return }
+                isAppFolderListMenuPresented = true
+                return
+            }
 
             if isAppFolderPopoverPresented {
                 isAppFolderPopoverPresented = false

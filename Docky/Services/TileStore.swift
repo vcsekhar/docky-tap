@@ -233,7 +233,8 @@ final class TileStore: ObservableObject {
             let seededFolderName = AppFolderNamingService.shared.seedName(for: folderApps)
             let createdFolder = PinnedTileItem.appFolder(
                 displayName: seededFolderName,
-                bundleIdentifiers: [targetBundleIdentifier, bundleIdentifier]
+                bundleIdentifiers: [targetBundleIdentifier, bundleIdentifier],
+                contentViewMode: .grid
             )
 
             var updatedItems = preferences.pinnedItems
@@ -268,7 +269,8 @@ final class TileStore: ObservableObject {
             updatedItems[folderIndex] = .appFolder(
                 id: folderItem.id,
                 displayName: folderItem.folderDisplayName ?? "Folder",
-                bundleIdentifiers: folderItem.folderBundleIdentifiers + [bundleIdentifier]
+                bundleIdentifiers: folderItem.folderBundleIdentifiers + [bundleIdentifier],
+                contentViewMode: folderItem.folderContentViewMode ?? .grid
             )
             preferences.pinnedItems = updatedItems
             refreshPinnedTilesFromPreferences()
@@ -311,7 +313,8 @@ final class TileStore: ObservableObject {
         pinnedItems[itemIndex] = .appFolder(
             id: existingItem.id,
             displayName: normalizedDisplayName,
-            bundleIdentifiers: existingItem.folderBundleIdentifiers
+            bundleIdentifiers: existingItem.folderBundleIdentifiers,
+            contentViewMode: existingItem.folderContentViewMode ?? .grid
         )
         preferences.pinnedItems = pinnedItems
         refreshPinnedTilesFromPreferences()
@@ -365,13 +368,52 @@ final class TileStore: ObservableObject {
             pinnedItems[itemIndex] = .appFolder(
                 id: existingItem.id,
                 displayName: existingItem.folderDisplayName ?? "Folder",
-                bundleIdentifiers: remainingBundleIdentifiers
+                bundleIdentifiers: remainingBundleIdentifiers,
+                contentViewMode: existingItem.folderContentViewMode ?? .grid
             )
         }
 
         preferences.pinnedItems = pinnedItems
         refreshPinnedTilesFromPreferences()
         rebuildTiles()
+    }
+
+    func setAppFolderContentViewMode(tileID: String, mode: FolderTileContentViewMode) {
+        guard let itemIndex = preferences.pinnedItems.firstIndex(where: { Self.pinnedTileID(for: $0) == tileID }),
+              preferences.pinnedItems[itemIndex].kind == .appFolder else {
+            return
+        }
+
+        let existingItem = preferences.pinnedItems[itemIndex]
+        guard (existingItem.folderContentViewMode ?? .grid) != mode else {
+            return
+        }
+
+        var pinnedItems = preferences.pinnedItems
+        pinnedItems[itemIndex] = PinnedTileItem(
+            id: existingItem.id,
+            kind: existingItem.kind,
+            bundleIdentifier: existingItem.bundleIdentifier,
+            folderDisplayName: existingItem.folderDisplayName,
+            folderBundleIdentifiers: existingItem.folderBundleIdentifiers,
+            folderContentViewMode: mode,
+            widgetKind: existingItem.widgetKind,
+            widgetOwnerBundleIdentifier: existingItem.widgetOwnerBundleIdentifier,
+            widgetSpan: existingItem.widgetSpan,
+            hiddenWidgetOwnerBundleIdentifiers: existingItem.hiddenWidgetOwnerBundleIdentifiers
+        )
+        preferences.pinnedItems = pinnedItems
+        refreshPinnedTilesFromPreferences()
+        rebuildTiles()
+    }
+
+    func appFolderContentViewMode(tileID: String) -> FolderTileContentViewMode {
+        guard let item = preferences.pinnedItems.first(where: { Self.pinnedTileID(for: $0) == tileID }),
+              item.kind == .appFolder else {
+            return .grid
+        }
+
+        return item.folderContentViewMode ?? .grid
     }
 
     func widgetPlacement(
@@ -479,6 +521,7 @@ final class TileStore: ObservableObject {
                     bundleIdentifier: nil,
                     folderDisplayName: nil,
                     folderBundleIdentifiers: [],
+                    folderContentViewMode: nil,
                     widgetKind: widgetKind,
                     widgetOwnerBundleIdentifier: ownerBundleIdentifier,
                     widgetSpan: item.widgetSpan,
@@ -491,6 +534,7 @@ final class TileStore: ObservableObject {
                     bundleIdentifier: nil,
                     folderDisplayName: nil,
                     folderBundleIdentifiers: [],
+                    folderContentViewMode: nil,
                     widgetKind: nil,
                     widgetOwnerBundleIdentifier: nil,
                     widgetSpan: nil,
@@ -503,6 +547,7 @@ final class TileStore: ObservableObject {
                     bundleIdentifier: nil,
                     folderDisplayName: nil,
                     folderBundleIdentifiers: [],
+                    folderContentViewMode: nil,
                     widgetKind: nil,
                     widgetOwnerBundleIdentifier: nil,
                     widgetSpan: nil,
@@ -515,6 +560,7 @@ final class TileStore: ObservableObject {
                     bundleIdentifier: nil,
                     folderDisplayName: nil,
                     folderBundleIdentifiers: [],
+                    folderContentViewMode: nil,
                     widgetKind: nil,
                     widgetOwnerBundleIdentifier: nil,
                     widgetSpan: nil,
@@ -668,6 +714,7 @@ final class TileStore: ObservableObject {
                 bundleIdentifier: existingItem.bundleIdentifier,
                 folderDisplayName: existingItem.folderDisplayName,
                 folderBundleIdentifiers: existingItem.folderBundleIdentifiers,
+                folderContentViewMode: existingItem.folderContentViewMode,
                 widgetKind: existingItem.widgetKind,
                 widgetOwnerBundleIdentifier: existingItem.widgetOwnerBundleIdentifier,
                 widgetSpan: existingItem.widgetSpan,
@@ -729,6 +776,7 @@ final class TileStore: ObservableObject {
             bundleIdentifier: existingItem.bundleIdentifier,
             folderDisplayName: existingItem.folderDisplayName,
             folderBundleIdentifiers: existingItem.folderBundleIdentifiers,
+            folderContentViewMode: existingItem.folderContentViewMode,
             widgetKind: existingItem.widgetKind,
             widgetOwnerBundleIdentifier: existingItem.widgetOwnerBundleIdentifier,
             widgetSpan: span,
@@ -1144,7 +1192,8 @@ final class TileStore: ObservableObject {
                 content: .appFolder(AppFolderTile(
                     identifier: item.id,
                     displayName: item.folderDisplayName ?? "Folder",
-                    apps: apps
+                    apps: apps,
+                    contentViewMode: item.folderContentViewMode ?? .grid
                 ))
             )
         case .widget:
@@ -1476,7 +1525,8 @@ final class TileStore: ObservableObject {
             return .appFolder(
                 id: folder.identifier,
                 displayName: folder.displayName,
-                bundleIdentifiers: folder.bundleIdentifiers
+                bundleIdentifiers: folder.bundleIdentifiers,
+                contentViewMode: folder.contentViewMode
             )
         case .widget, .smartStack:
             return nil
@@ -1487,6 +1537,7 @@ final class TileStore: ObservableObject {
                 bundleIdentifier: nil,
                 folderDisplayName: nil,
                 folderBundleIdentifiers: [],
+                folderContentViewMode: nil,
                 widgetKind: nil,
                 widgetOwnerBundleIdentifier: nil,
                 widgetSpan: nil,
@@ -1499,6 +1550,7 @@ final class TileStore: ObservableObject {
                 bundleIdentifier: nil,
                 folderDisplayName: nil,
                 folderBundleIdentifiers: [],
+                folderContentViewMode: nil,
                 widgetKind: nil,
                 widgetOwnerBundleIdentifier: nil,
                 widgetSpan: nil,
