@@ -198,8 +198,10 @@ struct WeatherWidgetTileView: View {
     private var backgroundColors: [Color] {
         if let snapshot = weather.snapshot {
             switch snapshot.symbolName {
-            case "sun.max.fill", "moon.stars.fill":
-                return [Color(red: 0.25, green: 0.52, blue: 0.96), Color(red: 0.97, green: 0.64, blue: 0.28)]
+            case "sun.max.fill":
+                return [Color(red: 0.52, green: 0.78, blue: 0.98), Color(red: 0.18, green: 0.48, blue: 0.88)]
+            case "moon.stars.fill":
+                return [Color(red: 0.40, green: 0.49, blue: 0.78), Color(red: 0.12, green: 0.15, blue: 0.38)]
             case "cloud.bolt.rain.fill":
                 return [Color(red: 0.19, green: 0.24, blue: 0.41), Color(red: 0.35, green: 0.42, blue: 0.63)]
             case "cloud.rain.fill", "cloud.drizzle.fill", "cloud.snow.fill", "cloud.fog.fill":
