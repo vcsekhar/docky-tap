@@ -559,6 +559,22 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// Whether Docky should hide the macOS system Dock while running.
+    /// Turning this on snapshots the user's current Dock preferences and
+    /// overwrites autohide/bounce behavior; turning it off restores the
+    /// snapshot. The snapshot is also restored when Docky quits.
+    @Published var hidesSystemDock: Bool {
+        didSet {
+            guard hidesSystemDock != oldValue else { return }
+            defaults.set(hidesSystemDock, forKey: Keys.hidesSystemDock)
+            if hidesSystemDock {
+                SystemDockVisibilityService.shared.hide()
+            } else {
+                SystemDockVisibilityService.shared.restore()
+            }
+        }
+    }
+
     /// Shape used for the active app indicator.
     @Published var activeIndicatorShape: DockTileIndicatorShape {
         didSet {
@@ -727,6 +743,7 @@ final class DockyPreferences: ObservableObject {
         static let windowBackgroundImagePath = "docky.windowBackgroundImagePath"
         static let windowPosition = "docky.windowPosition"
         static let autohidesWindow = "docky.autohidesWindow"
+        static let hidesSystemDock = "docky.hidesSystemDock"
         static let activeIndicatorShape = "docky.activeIndicatorShape"
         static let activeIndicatorImagePath = "docky.activeIndicatorImagePath"
         static let activeIndicatorColor = "docky.activeIndicatorColor"
@@ -749,6 +766,7 @@ final class DockyPreferences: ObservableObject {
         static let windowBackgroundImagePath: String? = nil
         static let windowPosition: DockWindowPosition = .system
         static let autohidesWindow = false
+        static let hidesSystemDock = false
         static let activeIndicatorShape: DockTileIndicatorShape = .dot
         static let activeIndicatorImagePath: String? = nil
         static let activeIndicatorColor: DockColor? = nil
@@ -772,6 +790,7 @@ final class DockyPreferences: ObservableObject {
         let storedWindowBackgroundImagePath = defaults.string(forKey: Keys.windowBackgroundImagePath)
         let storedWindowPosition = defaults.string(forKey: Keys.windowPosition)
         let storedAutohidesWindow = defaults.object(forKey: Keys.autohidesWindow) as? Bool
+        let storedHidesSystemDock = defaults.object(forKey: Keys.hidesSystemDock) as? Bool
         let storedActiveIndicatorShape = defaults.string(forKey: Keys.activeIndicatorShape)
         let storedActiveIndicatorImagePath = defaults.string(forKey: Keys.activeIndicatorImagePath)
         let storedActiveIndicatorColor = defaults.data(forKey: Keys.activeIndicatorColor)
@@ -794,6 +813,7 @@ final class DockyPreferences: ObservableObject {
         self.windowBackgroundImagePath = storedWindowBackgroundImagePath ?? DefaultValues.windowBackgroundImagePath
         self.windowPosition = (storedWindowPosition.flatMap(DockWindowPosition.init(rawValue:)) ?? DefaultValues.windowPosition)
         self.autohidesWindow = storedAutohidesWindow ?? DefaultValues.autohidesWindow
+        self.hidesSystemDock = storedHidesSystemDock ?? DefaultValues.hidesSystemDock
         self.activeIndicatorShape = (storedActiveIndicatorShape.flatMap(DockTileIndicatorShape.init(rawValue:)) ?? DefaultValues.activeIndicatorShape)
         self.activeIndicatorImagePath = storedActiveIndicatorImagePath ?? DefaultValues.activeIndicatorImagePath
         self.activeIndicatorColor = Self.decodeColor(from: storedActiveIndicatorColor) ?? DefaultValues.activeIndicatorColor
@@ -816,6 +836,7 @@ final class DockyPreferences: ObservableObject {
         windowBackgroundImagePath = DefaultValues.windowBackgroundImagePath
         windowPosition = DefaultValues.windowPosition
         autohidesWindow = DefaultValues.autohidesWindow
+        hidesSystemDock = DefaultValues.hidesSystemDock
         activeIndicatorShape = DefaultValues.activeIndicatorShape
         activeIndicatorImagePath = DefaultValues.activeIndicatorImagePath
         activeIndicatorColor = DefaultValues.activeIndicatorColor

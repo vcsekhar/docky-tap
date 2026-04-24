@@ -25,6 +25,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.accessory)
         configureMainMenu()
 
+        if DockyPreferences.shared.hidesSystemDock {
+            SystemDockVisibilityService.shared.hide()
+        }
+
         PermissionsService.shared.refresh()
         if PermissionsService.shared.setupComplete {
             PermissionsService.shared.markInitialOnboardingCompleted()
@@ -35,7 +39,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ aNotification: Notification) {
-        // Insert code here to tear down your application
+        if SystemDockVisibilityService.shared.hasSnapshot {
+            SystemDockVisibilityService.shared.restore()
+        }
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

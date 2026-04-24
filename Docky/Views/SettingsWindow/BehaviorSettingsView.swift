@@ -41,6 +41,23 @@ struct BehaviorSettingsView: View {
                 .padding(.vertical, 4)
             }
 
+            Section("System Dock") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Hide System Dock", isOn: $preferences.hidesSystemDock)
+                        .font(.headline)
+
+                    Text("Forces the macOS Dock to autohide with a long delay and disables bouncing and launch animations. Docky snapshots your current Dock settings first and restores them when you turn this off or quit Docky.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Restore System Dock") {
+                        preferences.hidesSystemDock = false
+                    }
+                    .disabled(!preferences.hidesSystemDock)
+                }
+                .padding(.vertical, 4)
+            }
+
             Section("App Folders") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Shows Grouped Opened Apps In Dock", isOn: $preferences.showsGroupedOpenedAppsInDock)
