@@ -30,6 +30,17 @@ enum TileContent: Equatable {
 struct AppTile: Equatable {
     let bundleIdentifier: String
     let displayName: String
+    let displayedWidget: WidgetTile?
+
+    nonisolated init(
+        bundleIdentifier: String,
+        displayName: String,
+        displayedWidget: WidgetTile? = nil
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.displayName = displayName
+        self.displayedWidget = displayedWidget
+    }
 }
 
 struct MinimizedWindowTile: Equatable {
@@ -67,6 +78,7 @@ struct AppFolderTile: Equatable {
 
 enum WidgetKind: String, CaseIterable, Codable, Identifiable {
     case calendar
+    case calendarDate
     case reminders
     case batteries
     case systemStatus
@@ -79,6 +91,8 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .calendar:
             "Calendar"
+        case .calendarDate:
+            "Date"
         case .reminders:
             "Reminders"
         case .batteries:
@@ -89,6 +103,15 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             "Now Playing"
         case .weather:
             "Weather"
+        }
+    }
+
+    var supportedSpans: [TileSpan] {
+        switch self {
+        case .calendarDate:
+            [.one]
+        case .calendar, .reminders, .batteries, .systemStatus, .nowPlaying, .weather:
+            TileSpan.allCases
         }
     }
 }
@@ -111,6 +134,16 @@ struct WidgetPlacement: Codable, Equatable, Identifiable {
     }
 }
 
+struct AppWidgetDisplay: Codable, Equatable, Identifiable {
+    let bundleIdentifier: String
+    let kind: WidgetKind
+    let span: TileSpan
+
+    var id: String {
+        bundleIdentifier
+    }
+}
+
 struct WidgetTile: Equatable {
     let identifier: String
     let title: String
@@ -119,7 +152,7 @@ struct WidgetTile: Equatable {
     let span: TileSpan
 
     var effectiveSpan: TileSpan {
-        span
+        kind.supportedSpans.contains(span) ? span : kind.supportedSpans.last ?? .one
     }
 }
 

@@ -53,6 +53,14 @@ enum WidgetCatalog {
         includesInSmartStack: true
     )
 
+    static let calendarDate = WidgetRegistration(
+        kind: .calendarDate,
+        ownerBundleIdentifier: WidgetOwnerBundleIdentifiers.calendar,
+        defaultSpan: .one,
+        includesInPalette: false,
+        includesInSmartStack: false
+    )
+
     static let batteries = WidgetRegistration(
         kind: .batteries,
         ownerBundleIdentifier: WidgetOwnerBundleIdentifiers.batteries,
@@ -87,6 +95,7 @@ enum WidgetCatalog {
 
     static let staticRegistrations: [WidgetRegistration] = [
         calendar,
+        calendarDate,
         reminders,
         batteries,
         systemStatus,

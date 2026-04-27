@@ -324,6 +324,8 @@ private struct PaletteItemView: View {
             switch kind {
             case .calendar:
                 "calendar"
+            case .calendarDate:
+                "calendar"
             case .reminders:
                 "checklist"
             case .batteries:
@@ -363,6 +365,8 @@ private struct PaletteItemView: View {
             switch kind {
             case .calendar:
                 "Shows the current date and month at a glance"
+            case .calendarDate:
+                "Shows the weekday and date number at a glance"
             case .reminders:
                 "Shows your open tasks and what needs attention next"
             case .batteries:

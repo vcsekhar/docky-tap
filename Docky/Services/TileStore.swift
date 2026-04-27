@@ -57,11 +57,19 @@ final class TileStore: ObservableObject {
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.synchronizeAppWidgetDisplaysWithFolders()
                 self?.refreshPinnedTilesFromPreferences()
                 self?.rebuildTiles()
             }
             .store(in: &cancellables)
         preferences.$widgetPlacements
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuildTiles()
+            }
+            .store(in: &cancellables)
+        preferences.$appWidgetDisplays
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -124,6 +132,7 @@ final class TileStore: ObservableObject {
             bundleIdentifier(of: tile).map { ($0, tile) }
         })
         seedPinnedPreferencesIfNeeded(from: refreshedPinnedTiles)
+        synchronizeAppWidgetDisplaysWithFolders()
         refreshPinnedTilesFromPreferences()
         systemOtherTiles = others.enumerated().compactMap { index, entry in
             Self.parse(entry: entry, fallbackID: Self.fallbackTileID(for: entry, at: index, section: "persistent-others"))
@@ -146,6 +155,16 @@ final class TileStore: ObservableObject {
         preferences.pinnedItems.contains {
             ($0.kind == .app && $0.bundleIdentifier == bundleIdentifier)
                 || ($0.kind == .appFolder && $0.folderBundleIdentifiers.contains(bundleIdentifier))
+        }
+    }
+
+    func isAppInFolder(bundleIdentifier: String) -> Bool {
+        guard !bundleIdentifier.isEmpty else {
+            return false
+        }
+
+        return preferences.pinnedItems.contains {
+            $0.kind == .appFolder && $0.folderBundleIdentifiers.contains(bundleIdentifier)
         }
     }
 
@@ -560,6 +579,84 @@ final class TileStore: ObservableObject {
         preferences.widgetPlacements.removeAll {
             $0.kind == kind && $0.ownerBundleIdentifier == ownerBundleIdentifier
         }
+    }
+
+    func appWidgetCandidates(bundleIdentifier: String) -> [WidgetTile] {
+        guard !bundleIdentifier.isEmpty,
+              !isAppInFolder(bundleIdentifier: bundleIdentifier) else {
+            return []
+        }
+
+        var candidates = WidgetCatalog.staticRegistrations
+            .filter { $0.ownerBundleIdentifier == bundleIdentifier }
+            .map { $0.makeTile() }
+
+        if mediaPlayback.state(for: bundleIdentifier) != nil
+            || appWidgetDisplay(bundleIdentifier: bundleIdentifier)?.kind == .nowPlaying {
+            candidates.append(Self.makeWidgetTile(
+                kind: .nowPlaying,
+                ownerBundleIdentifier: bundleIdentifier,
+                span: defaultAppWidgetSpan(kind: .nowPlaying, ownerBundleIdentifier: bundleIdentifier)
+            ))
+        }
+
+        return candidates
+    }
+
+    func appWidgetDisplay(bundleIdentifier: String) -> AppWidgetDisplay? {
+        preferences.appWidgetDisplays.first { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    func setAppWidgetDisplay(bundleIdentifier: String, kind: WidgetKind) {
+        guard !bundleIdentifier.isEmpty,
+              !isAppInFolder(bundleIdentifier: bundleIdentifier) else {
+            return
+        }
+
+        let existingSpan = appWidgetDisplay(bundleIdentifier: bundleIdentifier)
+            .flatMap { $0.kind == kind ? $0.span : nil }
+        let span = existingSpan ?? defaultAppWidgetSpan(kind: kind, ownerBundleIdentifier: bundleIdentifier)
+
+        var displays = preferences.appWidgetDisplays.filter { $0.bundleIdentifier != bundleIdentifier }
+        displays.append(AppWidgetDisplay(
+            bundleIdentifier: bundleIdentifier,
+            kind: kind,
+            span: span
+        ))
+        preferences.appWidgetDisplays = displays.sorted {
+            $0.bundleIdentifier.localizedCaseInsensitiveCompare($1.bundleIdentifier) == .orderedAscending
+        }
+    }
+
+    func removeAppWidgetDisplay(bundleIdentifier: String) {
+        preferences.appWidgetDisplays.removeAll { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    func setAppWidgetDisplaySpan(bundleIdentifier: String, span: TileSpan) {
+        guard let existingDisplay = appWidgetDisplay(bundleIdentifier: bundleIdentifier),
+              !isAppInFolder(bundleIdentifier: bundleIdentifier),
+              existingDisplay.span != span else {
+            return
+        }
+
+        let resolvedSpan = existingDisplay.kind.supportedSpans.contains(span)
+            ? span
+            : existingDisplay.kind.supportedSpans.last ?? .one
+        guard existingDisplay.span != resolvedSpan else {
+            return
+        }
+
+        var displays = preferences.appWidgetDisplays
+        guard let displayIndex = displays.firstIndex(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            return
+        }
+
+        displays[displayIndex] = AppWidgetDisplay(
+            bundleIdentifier: existingDisplay.bundleIdentifier,
+            kind: existingDisplay.kind,
+            span: resolvedSpan
+        )
+        preferences.appWidgetDisplays = displays
     }
 
     func insertPinnedItem(kind: PinnedTileItemKind, at destinationIndex: Int) {
@@ -1254,6 +1351,24 @@ final class TileStore: ObservableObject {
         pinnedTiles = preferences.pinnedItems.compactMap(tile(for:))
     }
 
+    private func synchronizeAppWidgetDisplaysWithFolders() {
+        let folderBundleIdentifiers = Set(preferences.pinnedItems.flatMap { item in
+            item.kind == .appFolder ? item.folderBundleIdentifiers : []
+        })
+        guard !folderBundleIdentifiers.isEmpty else {
+            return
+        }
+
+        let filteredDisplays = preferences.appWidgetDisplays.filter {
+            !folderBundleIdentifiers.contains($0.bundleIdentifier)
+        }
+        guard filteredDisplays != preferences.appWidgetDisplays else {
+            return
+        }
+
+        preferences.appWidgetDisplays = filteredDisplays
+    }
+
     private func refreshTrailingPreferencesIfNeeded() {
         let systemItems = systemOtherTiles.compactMap(Self.trailingItem(from:)) + [.trash()]
         guard !systemItems.isEmpty else {
@@ -1518,7 +1633,7 @@ final class TileStore: ObservableObject {
         }
         result.append(Tile(id: "divider:trailing", content: .divider))
         result.append(contentsOf: trailingTiles(withInsertedMinimizedWindows: minimizedWindowTiles))
-        tiles = result
+        tiles = result.map(applyingAppWidgetDisplay(to:))
     }
 
     private func trailingTiles(withInsertedMinimizedWindows minimizedWindowTiles: [Tile]) -> [Tile] {
@@ -1607,6 +1722,51 @@ final class TileStore: ObservableObject {
                     ))
                 )
             }
+    }
+
+    private func applyingAppWidgetDisplay(to tile: Tile) -> Tile {
+        guard case .app(let app) = tile.content,
+              let displayedWidget = displayedAppWidget(for: app.bundleIdentifier) else {
+            return tile
+        }
+
+        return Tile(
+            id: tile.id,
+            content: .app(AppTile(
+                bundleIdentifier: app.bundleIdentifier,
+                displayName: app.displayName,
+                displayedWidget: displayedWidget
+            ))
+        )
+    }
+
+    private func displayedAppWidget(for bundleIdentifier: String) -> WidgetTile? {
+        guard let display = appWidgetDisplay(bundleIdentifier: bundleIdentifier),
+              !isAppInFolder(bundleIdentifier: bundleIdentifier),
+              isAppWidgetDisplayActive(display) else {
+            return nil
+        }
+
+        return Self.makeWidgetTile(
+            kind: display.kind,
+            ownerBundleIdentifier: bundleIdentifier,
+            span: display.span
+        )
+    }
+
+    private func isAppWidgetDisplayActive(_ display: AppWidgetDisplay) -> Bool {
+        switch display.kind {
+        case .nowPlaying:
+            mediaPlayback.state(for: display.bundleIdentifier)?.hasContent == true
+        case .calendar, .calendarDate, .reminders, .batteries, .systemStatus, .weather:
+            true
+        }
+    }
+
+    private func defaultAppWidgetSpan(kind: WidgetKind, ownerBundleIdentifier: String) -> TileSpan {
+        WidgetCatalog.staticRegistrations.first {
+            $0.kind == kind && $0.ownerBundleIdentifier == ownerBundleIdentifier
+        }?.defaultSpan ?? .three
     }
 
     private func allSmartStackWidgets() -> [WidgetTile] {

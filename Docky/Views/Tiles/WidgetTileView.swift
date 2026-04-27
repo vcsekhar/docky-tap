@@ -13,7 +13,7 @@ struct WidgetTileView: View {
 
     var body: some View {
         switch tile.kind {
-        case .calendar:
+        case .calendar, .calendarDate:
             CalendarWidgetTileView(
                 tile: tile,
                 cornerRadius: cornerRadius,
