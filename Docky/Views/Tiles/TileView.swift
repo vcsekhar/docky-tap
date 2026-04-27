@@ -1039,6 +1039,25 @@ struct TileView: View {
             actions.append(.divider)
             actions.append(widgetRemovalAction(for: widget))
             return actions
+        case .systemStatus:
+            var actions: [ContextAction] = [
+                .action("Refresh Status") {
+                    SystemStatusService.shared.refresh(force: true)
+                }
+            ]
+
+            if let spanMenuAction = widgetSpanMenuAction(for: widget) {
+                actions.append(.divider)
+                actions.append(spanMenuAction)
+            }
+
+            actions.append(.divider)
+            actions.append(.action("Open Activity Monitor") {
+                SystemStatusService.shared.openInActivityMonitor()
+            })
+            actions.append(.divider)
+            actions.append(widgetRemovalAction(for: widget))
+            return actions
         case .nowPlaying:
             var actions: [ContextAction] = []
 
@@ -1214,6 +1233,8 @@ struct TileView: View {
             WorkspaceService.shared.activateOrOpen(bundleIdentifier: WidgetOwnerBundleIdentifiers.reminders)
         case .batteries:
             BatteriesService.shared.openInBatterySettings()
+        case .systemStatus:
+            SystemStatusService.shared.openInActivityMonitor()
         case .nowPlaying:
             Task {
                 await mediaPlayback.togglePlayPause(for: widget.ownerBundleIdentifier)

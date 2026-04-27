@@ -9,6 +9,7 @@ enum WidgetOwnerBundleIdentifiers {
     static let calendar = "com.apple.iCal"
     static let reminders = "com.apple.reminders"
     static let batteries = "gt.quintero.Docky.batteries"
+    static let systemStatus = "gt.quintero.Docky.system-status"
     static let weather = "gt.quintero.Docky.weather"
     static let genericNowPlaying = "gt.quintero.Docky.now-playing"
 }
@@ -60,6 +61,14 @@ enum WidgetCatalog {
         includesInSmartStack: true
     )
 
+    static let systemStatus = WidgetRegistration(
+        kind: .systemStatus,
+        ownerBundleIdentifier: WidgetOwnerBundleIdentifiers.systemStatus,
+        defaultSpan: .three,
+        includesInPalette: true,
+        includesInSmartStack: true
+    )
+
     static let weather = WidgetRegistration(
         kind: .weather,
         ownerBundleIdentifier: WidgetOwnerBundleIdentifiers.weather,
@@ -80,6 +89,7 @@ enum WidgetCatalog {
         calendar,
         reminders,
         batteries,
+        systemStatus,
         weather,
         genericNowPlaying,
     ]

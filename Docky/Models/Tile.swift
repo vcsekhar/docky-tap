@@ -69,6 +69,7 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
     case calendar
     case reminders
     case batteries
+    case systemStatus
     case nowPlaying
     case weather
 
@@ -82,6 +83,8 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             "Reminders"
         case .batteries:
             "Batteries"
+        case .systemStatus:
+            "System Status"
         case .nowPlaying:
             "Now Playing"
         case .weather:

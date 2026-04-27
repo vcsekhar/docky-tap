@@ -328,6 +328,8 @@ private struct PaletteItemView: View {
                 "checklist"
             case .batteries:
                 "battery.100percent"
+            case .systemStatus:
+                "gauge.with.needle"
             case .nowPlaying:
                 "waveform"
             case .weather:
@@ -365,6 +367,8 @@ private struct PaletteItemView: View {
                 "Shows your open tasks and what needs attention next"
             case .batteries:
                 "Shows Mac and accessory battery levels at a glance"
+            case .systemStatus:
+                "Shows CPU, memory, and network activity at a glance"
             case .nowPlaying:
                 "Adds a now playing widget inline"
             case .weather:
