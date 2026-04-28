@@ -90,7 +90,7 @@ struct TileContainerView: View {
                             return true
                         }
 
-                    guard let paletteItem = editMode.paletteDrag?.item,
+                    guard let paletteDrag = editMode.paletteDrag,
                           let destination = editMode.paletteDropDestination else {
                         editMode.endPaletteDrag()
                         return false
@@ -98,13 +98,13 @@ struct TileContainerView: View {
 
                     switch destination.section {
                     case .pinned:
-                        guard let pinnedItem = makePinnedItem(from: paletteItem) else {
+                        guard let pinnedItem = makePinnedItem(from: paletteDrag) else {
                             editMode.endPaletteDrag()
                             return false
                         }
                         TileStore.shared.insertPinnedItem(pinnedItem, at: destination.index)
                     case .trailing:
-                        guard let trailingItem = makeTrailingItem(from: paletteItem) else {
+                        guard let trailingItem = makeTrailingItem(from: paletteDrag) else {
                             editMode.endPaletteDrag()
                             return false
                         }
@@ -381,6 +381,11 @@ struct TileContainerView: View {
         case .divider:
             return Tile(id: "editor-preview:divider", content: .divider)
         case .widget(let ownerBundleIdentifier, let kind):
+            let span = resolvedPaletteWidgetSpan(
+                ownerBundleIdentifier: ownerBundleIdentifier,
+                kind: kind,
+                requestedSpan: paletteDrag.widgetSpan
+            )
             return Tile(
                 id: "editor-preview:widget",
                 content: .widget(WidgetTile(
@@ -388,7 +393,7 @@ struct TileContainerView: View {
                     title: kind.title,
                     kind: kind,
                     ownerBundleIdentifier: ownerBundleIdentifier,
-                    span: .three
+                    span: span
                 ))
             )
         case .smartStack:
@@ -397,7 +402,7 @@ struct TileContainerView: View {
                 content: .smartStack(SmartStackTile(
                     identifier: "editor-preview:smart-stack",
                     title: "Smart Stack",
-                    widgets: [],
+                    widgets: WidgetCatalog.smartStackRegistrations.map { $0.makeTile() },
                     span: .three
                 ))
             )
@@ -416,7 +421,7 @@ struct TileContainerView: View {
         let clampedDestinationIndex = min(max(destinationIndex, 0), remainingTrailingTiles.count)
         if let draggedTile, store.makeTrailingItem(from: draggedTile) != nil {
             remainingTrailingTiles.insert(draggedTile, at: clampedDestinationIndex)
-        } else if let palettePreviewTile, makeTrailingItem(from: editMode.paletteDrag?.item) != nil {
+        } else if let palettePreviewTile, makeTrailingItem(from: editMode.paletteDrag) != nil {
             remainingTrailingTiles.insert(palettePreviewTile, at: clampedDestinationIndex)
         }
         return remainingTrailingTiles
@@ -693,41 +698,82 @@ struct TileContainerView: View {
         }
     }
 
-    private func makePinnedItem(from paletteItem: DockEditPaletteItem) -> PinnedTileItem? {
+    private func makePinnedItem(from paletteDrag: DockEditPaletteDrag) -> PinnedTileItem? {
+        makePinnedItem(from: paletteDrag.item, widgetSpan: paletteDrag.widgetSpan)
+    }
+
+    private func makePinnedItem(from paletteDrag: DockEditPaletteDrag?) -> PinnedTileItem? {
+        guard let paletteDrag else {
+            return nil
+        }
+
+        return makePinnedItem(from: paletteDrag)
+    }
+
+    private func makePinnedItem(from paletteItem: DockEditPaletteItem, widgetSpan: TileSpan?) -> PinnedTileItem? {
         return switch paletteItem {
         case .spacer:
             PinnedTileItem.spacer()
         case .divider:
             PinnedTileItem.divider()
         case .widget(let ownerBundleIdentifier, let kind):
-            PinnedTileItem.widget(kind: kind, ownerBundleIdentifier: ownerBundleIdentifier)
+            PinnedTileItem.widget(
+                kind: kind,
+                ownerBundleIdentifier: ownerBundleIdentifier,
+                span: resolvedPaletteWidgetSpan(
+                    ownerBundleIdentifier: ownerBundleIdentifier,
+                    kind: kind,
+                    requestedSpan: widgetSpan
+                )
+            )
         case .smartStack:
             PinnedTileItem.smartStack()
         }
     }
 
-    private func makePinnedItem(from paletteItem: DockEditPaletteItem?) -> PinnedTileItem? {
-        guard let paletteItem else {
-            return nil
-        }
-        return makePinnedItem(from: paletteItem)
-    }
-
-    private func makeTrailingItem(from paletteItem: DockEditPaletteItem?) -> TrailingTileItem? {
-        guard let paletteItem else {
+    private func makeTrailingItem(from paletteDrag: DockEditPaletteDrag?) -> TrailingTileItem? {
+        guard let paletteDrag else {
             return nil
         }
 
-        return switch paletteItem {
+        return switch paletteDrag.item {
         case .spacer:
             TrailingTileItem.spacer()
         case .divider:
             TrailingTileItem.divider()
         case .widget(let ownerBundleIdentifier, let kind):
-            TrailingTileItem.widget(kind: kind, ownerBundleIdentifier: ownerBundleIdentifier)
+            TrailingTileItem.widget(
+                kind: kind,
+                ownerBundleIdentifier: ownerBundleIdentifier,
+                span: resolvedPaletteWidgetSpan(
+                    ownerBundleIdentifier: ownerBundleIdentifier,
+                    kind: kind,
+                    requestedSpan: paletteDrag.widgetSpan
+                )
+            )
         case .smartStack:
             TrailingTileItem.smartStack()
         }
+    }
+
+    private func resolvedPaletteWidgetSpan(
+        ownerBundleIdentifier: String,
+        kind: WidgetKind,
+        requestedSpan: TileSpan?
+    ) -> TileSpan {
+        let supportedSpans = kind.supportedSpans
+        if let requestedSpan, supportedSpans.contains(requestedSpan) {
+            return requestedSpan
+        }
+
+        if let catalogSpan = WidgetCatalog.staticRegistrations.first(where: {
+            $0.ownerBundleIdentifier == ownerBundleIdentifier && $0.kind == kind
+        })?.defaultSpan,
+           supportedSpans.contains(catalogSpan) {
+            return catalogSpan
+        }
+
+        return supportedSpans.last ?? .one
     }
 
     private var isDraggingPinnedTile: Bool {
@@ -938,8 +984,8 @@ struct TileContainerView: View {
             sourceTileID: palettePreviewTile.id,
             isPinnedSource: false,
             isTrailingSource: false,
-            canDropIntoPinned: makePinnedItem(from: editMode.paletteDrag?.item) != nil,
-            canDropIntoTrailing: makeTrailingItem(from: editMode.paletteDrag?.item) != nil
+            canDropIntoPinned: makePinnedItem(from: editMode.paletteDrag) != nil,
+            canDropIntoTrailing: makeTrailingItem(from: editMode.paletteDrag) != nil
         )
     }
 

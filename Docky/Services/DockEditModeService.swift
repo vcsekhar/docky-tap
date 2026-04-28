@@ -29,6 +29,7 @@ enum DockEditPaletteItem: Equatable, Identifiable {
 
 struct DockEditPaletteDrag: Equatable {
     let item: DockEditPaletteItem
+    let widgetSpan: TileSpan?
     let location: CGPoint
 }
 
@@ -64,14 +65,14 @@ final class DockEditModeService: ObservableObject {
         isActive ? exit() : enter()
     }
 
-    func updatePaletteDrag(item: DockEditPaletteItem, location: CGPoint) {
+    func updatePaletteDrag(item: DockEditPaletteItem, location: CGPoint, widgetSpan: TileSpan? = nil) {
         isActive = true
-        paletteDrag = DockEditPaletteDrag(item: item, location: location)
+        paletteDrag = DockEditPaletteDrag(item: item, widgetSpan: widgetSpan, location: location)
     }
 
-    func beginPaletteDrag(item: DockEditPaletteItem) {
+    func beginPaletteDrag(item: DockEditPaletteItem, widgetSpan: TileSpan? = nil) {
         isActive = true
-        paletteDrag = DockEditPaletteDrag(item: item, location: .zero)
+        paletteDrag = DockEditPaletteDrag(item: item, widgetSpan: widgetSpan, location: .zero)
     }
 
     func endPaletteDrag() {

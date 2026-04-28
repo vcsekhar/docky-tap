@@ -87,7 +87,7 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    nonisolated var title: String {
         switch self {
         case .calendar:
             "Calendar"
@@ -106,7 +106,7 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    var supportedSpans: [TileSpan] {
+    nonisolated var supportedSpans: [TileSpan] {
         switch self {
         case .calendarDate:
             [.one]
