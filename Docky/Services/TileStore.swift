@@ -338,34 +338,43 @@ final class TileStore: ObservableObject {
 
     @discardableResult
     func groupApp(bundleIdentifier: String, intoTileID targetTileID: String) -> Bool {
-        guard !bundleIdentifier.isEmpty,
-              bundleIdentifier != Self.finderBundleID,
-              let targetIndex = preferences.pinnedItems.firstIndex(where: { Self.pinnedTileID(for: $0) == targetTileID }) else {
+        groupApps(bundleIdentifiers: [bundleIdentifier], intoTileID: targetTileID)
+    }
+
+    @discardableResult
+    func groupApps(bundleIdentifiers: [String], intoTileID targetTileID: String) -> Bool {
+        guard let targetIndex = preferences.pinnedItems.firstIndex(where: { Self.pinnedTileID(for: $0) == targetTileID }) else {
             return false
         }
 
         let targetItem = preferences.pinnedItems[targetIndex]
+        let normalizedBundleIdentifiers = normalizedGroupedAppBundleIdentifiers(bundleIdentifiers)
+
         switch targetItem.kind {
         case .app:
-            guard let targetBundleIdentifier = targetItem.bundleIdentifier,
-                  targetBundleIdentifier != bundleIdentifier else {
+            guard let targetBundleIdentifier = targetItem.bundleIdentifier else {
                 return false
             }
 
-            let folderApps = [targetBundleIdentifier, bundleIdentifier].compactMap(Self.makeAppTile(bundleIdentifier:))
+            let sourceBundleIdentifiers = normalizedBundleIdentifiers.filter { $0 != targetBundleIdentifier }
+            guard !sourceBundleIdentifiers.isEmpty else {
+                return false
+            }
+
+            let folderBundleIdentifiers = [targetBundleIdentifier] + sourceBundleIdentifiers
+            let folderApps = folderBundleIdentifiers.compactMap(Self.makeAppTile(bundleIdentifier:))
             let seededFolderName = AppFolderNamingService.shared.seedName(for: folderApps)
             let createdFolder = PinnedTileItem.appFolder(
                 displayName: seededFolderName,
-                bundleIdentifiers: [targetBundleIdentifier, bundleIdentifier],
+                bundleIdentifiers: folderBundleIdentifiers,
                 contentViewMode: .grid
             )
 
-            var updatedItems = preferences.pinnedItems
-            updatedItems.removeAll {
-                ($0.kind == .app && $0.bundleIdentifier == bundleIdentifier)
-                    || Self.pinnedTileID(for: $0) == targetTileID
-            }
-            let insertionIndex = min(targetIndex, updatedItems.count)
+            var updatedItems = removingGroupedApps(sourceBundleIdentifiers, replacingTargetTileID: targetTileID)
+            let insertionIndex = min(
+                groupedAppInsertionIndex(before: targetIndex, removing: sourceBundleIdentifiers),
+                updatedItems.count
+            )
             updatedItems.insert(createdFolder, at: insertionIndex)
             preferences.pinnedItems = updatedItems
             refreshPinnedTilesFromPreferences()
@@ -376,16 +385,15 @@ final class TileStore: ObservableObject {
                 apps: folderApps
             )
             return true
-        case .launchpad:
-            return false
         case .appFolder:
-            guard !targetItem.folderBundleIdentifiers.contains(bundleIdentifier) else {
+            let sourceBundleIdentifiers = normalizedBundleIdentifiers.filter {
+                !targetItem.folderBundleIdentifiers.contains($0)
+            }
+            guard !sourceBundleIdentifiers.isEmpty else {
                 return false
             }
 
-            var updatedItems = preferences.pinnedItems.filter {
-                !($0.kind == .app && $0.bundleIdentifier == bundleIdentifier)
-            }
+            var updatedItems = removingGroupedApps(sourceBundleIdentifiers)
             guard let folderIndex = updatedItems.firstIndex(where: { Self.pinnedTileID(for: $0) == targetTileID }) else {
                 return false
             }
@@ -394,14 +402,14 @@ final class TileStore: ObservableObject {
             updatedItems[folderIndex] = .appFolder(
                 id: folderItem.id,
                 displayName: folderItem.folderDisplayName ?? "Folder",
-                bundleIdentifiers: folderItem.folderBundleIdentifiers + [bundleIdentifier],
+                bundleIdentifiers: folderItem.folderBundleIdentifiers + sourceBundleIdentifiers,
                 contentViewMode: folderItem.folderContentViewMode ?? .grid
             )
             preferences.pinnedItems = updatedItems
             refreshPinnedTilesFromPreferences()
             rebuildTiles()
             return true
-        case .widget, .smartStack, .spacer, .divider:
+        case .launchpad, .widget, .smartStack, .spacer, .divider:
             return false
         }
     }
@@ -1552,6 +1560,89 @@ final class TileStore: ObservableObject {
 
     private func pinnedItem(forTileID tileID: String) -> PinnedTileItem? {
         preferences.pinnedItems.first { Self.pinnedTileID(for: $0) == tileID }
+    }
+
+    private func normalizedGroupedAppBundleIdentifiers(_ bundleIdentifiers: [String]) -> [String] {
+        var seen: Set<String> = []
+
+        return bundleIdentifiers.filter { bundleIdentifier in
+            guard !bundleIdentifier.isEmpty,
+                  bundleIdentifier != Self.finderBundleID else {
+                return false
+            }
+
+            return seen.insert(bundleIdentifier).inserted
+        }
+    }
+
+    private func groupedAppInsertionIndex(before targetIndex: Int, removing bundleIdentifiers: [String]) -> Int {
+        let removedBundleIdentifiers = Set(bundleIdentifiers)
+
+        return preferences.pinnedItems.prefix(targetIndex).reduce(into: 0) { count, item in
+            switch item.kind {
+            case .app:
+                if let bundleIdentifier = item.bundleIdentifier,
+                   removedBundleIdentifiers.contains(bundleIdentifier) {
+                    return
+                }
+                count += 1
+            case .appFolder:
+                let remainingBundleIdentifiers = item.folderBundleIdentifiers.filter {
+                    !removedBundleIdentifiers.contains($0)
+                }
+                if remainingBundleIdentifiers.isEmpty {
+                    return
+                }
+                count += 1
+            case .launchpad, .widget, .smartStack, .spacer, .divider:
+                count += 1
+            }
+        }
+    }
+
+    private func removingGroupedApps(
+        _ bundleIdentifiers: [String],
+        replacingTargetTileID targetTileID: String? = nil
+    ) -> [PinnedTileItem] {
+        let removedBundleIdentifiers = Set(bundleIdentifiers)
+
+        return preferences.pinnedItems.compactMap { item in
+            if let targetTileID, Self.pinnedTileID(for: item) == targetTileID {
+                return nil
+            }
+
+            switch item.kind {
+            case .app:
+                guard let bundleIdentifier = item.bundleIdentifier else {
+                    return item
+                }
+                return removedBundleIdentifiers.contains(bundleIdentifier) ? nil : item
+            case .appFolder:
+                let remainingBundleIdentifiers = item.folderBundleIdentifiers.filter {
+                    !removedBundleIdentifiers.contains($0)
+                }
+                guard remainingBundleIdentifiers.count != item.folderBundleIdentifiers.count else {
+                    return item
+                }
+
+                expandedInlineAppFolderIDs.remove(item.id)
+                switch remainingBundleIdentifiers.count {
+                case 0:
+                    return nil
+                case 1:
+                    return .app(bundleIdentifier: remainingBundleIdentifiers[0])
+                default:
+                    return .appFolder(
+                        id: item.id,
+                        displayName: item.folderDisplayName ?? "Folder",
+                        bundleIdentifiers: remainingBundleIdentifiers,
+                        contentViewMode: item.folderContentViewMode ?? .grid
+                    )
+                }
+            case .launchpad, .widget, .smartStack, .spacer, .divider:
+                return item
+            }
+        }
     }
 
     private func trailingItem(forTileID tileID: String) -> TrailingTileItem? {

@@ -23,6 +23,8 @@ struct TileContainerView: View {
     @State private var draggedPinnedTileDestinationIndex: Int?
     @State private var draggedTrailingTileDestinationIndex: Int?
     @State private var draggedAppFolderTargetTileID: String?
+    @State private var draggedAdditionalTileIDs: [String] = []
+    @State private var draggedPickupCandidateTileID: String?
     @State private var externalAppDropDestinationIndex: Int?
     @State private var externalFolderDropDestinationIndex: Int?
     @State private var tileFrames: [String: CGRect] = [:]
@@ -138,6 +140,7 @@ struct TileContainerView: View {
 
             draggedTileOverlay
         }
+        .background(TileDragKeyMonitor(keyDownHandler: handleDragKeyDown))
     }
 
     @ViewBuilder
@@ -252,7 +255,7 @@ struct TileContainerView: View {
         )
         TileView(tile: tile)
             .frame(width: size.width, height: size.height)
-            .opacity(tile.id == draggedTileID ? 0 : 1)
+            .opacity(isHiddenForActiveDrag(tileID: tile.id) ? 0 : 1)
             .background(alignment: .topLeading) {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -276,12 +279,37 @@ struct TileContainerView: View {
                 position: position,
                 compactWidgets: layout.compactsWidgetsForOverflow
             )
-            TileView(tile: draggedTile, isDragging: true)
-                .frame(width: size.width, height: size.height)
+            ZStack {
+                draggedSelectionStackPreview(size: size)
+
+                TileView(tile: draggedTile, isDragging: true)
+                    .frame(width: size.width, height: size.height)
+            }
                 .position(draggedTilePosition)
                 .offset(axisSize(value: draggedTileOffset))
                 .zIndex(10)
                 .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private func draggedSelectionStackPreview(size: CGSize) -> some View {
+        let additionalBundleIdentifiers = draggedPreviewAdditionalBundleIdentifiers
+        if !additionalBundleIdentifiers.isEmpty {
+            ForEach(Array(additionalBundleIdentifiers.enumerated()), id: \.element) { index, bundleIdentifier in
+                let depth = additionalBundleIdentifiers.count - index
+                AppTileView(
+                    tile: AppTile(bundleIdentifier: bundleIdentifier, displayName: ""),
+                    clipShape: preferences.tileClipShape,
+                    transparencyCompensationInset: dragPreviewStackTileChromeInset
+                )
+                .frame(width: size.width, height: size.height)
+                .rotationEffect(.degrees(dragPreviewStackRotationDegrees(for: depth)))
+                .offset(
+                    x: dragPreviewStackOffset(for: depth),
+                    y: dragPreviewStackOffset(for: depth + 1)
+                )
+            }
         }
     }
 
@@ -365,11 +393,16 @@ struct TileContainerView: View {
     }
 
     private var previewPinnedBaseTiles: [Tile] {
-        guard let destinationIndex = activePinnedDropDestinationIndex else {
-            return pinnedTiles
+        var remainingPinnedTiles = pinnedTiles
+        if !draggedAdditionalTileIDs.isEmpty {
+            let hiddenTileIDs = Set(draggedAdditionalTileIDs)
+            remainingPinnedTiles.removeAll { hiddenTileIDs.contains($0.id) }
         }
 
-        var remainingPinnedTiles = pinnedTiles
+        guard let destinationIndex = activePinnedDropDestinationIndex else {
+            return remainingPinnedTiles
+        }
+
         if let draggedTileID {
             remainingPinnedTiles.removeAll { $0.id == draggedTileID }
         }
@@ -396,7 +429,9 @@ struct TileContainerView: View {
                 continue
             }
 
-            result.append(contentsOf: groupedOpenedAppTilesByFolderID[folder.identifier] ?? [])
+            result.append(contentsOf: (groupedOpenedAppTilesByFolderID[folder.identifier] ?? []).filter {
+                !isHiddenForActiveDrag(tileID: $0.id)
+            })
         }
 
         return result
@@ -452,11 +487,16 @@ struct TileContainerView: View {
     }
 
     private var previewTrailingTiles: [Tile] {
-        guard let destinationIndex = activeTrailingDropDestinationIndex else {
-            return trailingTiles
+        var remainingTrailingTiles = trailingTiles
+        if !draggedAdditionalTileIDs.isEmpty {
+            let hiddenTileIDs = Set(draggedAdditionalTileIDs)
+            remainingTrailingTiles.removeAll { hiddenTileIDs.contains($0.id) }
         }
 
-        var remainingTrailingTiles = trailingTiles
+        guard let destinationIndex = activeTrailingDropDestinationIndex else {
+            return remainingTrailingTiles
+        }
+
         if let draggedTileID {
             remainingTrailingTiles.removeAll { $0.id == draggedTileID }
         }
@@ -505,6 +545,50 @@ struct TileContainerView: View {
         }
 
         return store.tiles.first { $0.id == draggedTileID }
+    }
+
+    private var orderedDraggedSelectionTileIDs: [String] {
+        var result: [String] = []
+        if let draggedTileID {
+            result.append(draggedTileID)
+        }
+
+        for tileID in draggedAdditionalTileIDs where !result.contains(tileID) {
+            result.append(tileID)
+        }
+
+        return result
+    }
+
+    private var draggedSelectionTileIDs: Set<String> {
+        Set(orderedDraggedSelectionTileIDs)
+    }
+
+    private var draggedSelectionBundleIdentifiers: [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+
+        for tileID in orderedDraggedSelectionTileIDs {
+            guard let bundleIdentifier = bundleIdentifier(forTileID: tileID),
+                  seen.insert(bundleIdentifier).inserted else {
+                continue
+            }
+            result.append(bundleIdentifier)
+        }
+
+        return result
+    }
+
+    private var draggedPreviewAdditionalBundleIdentifiers: [String] {
+        Array(draggedSelectionBundleIdentifiers.dropFirst().suffix(3))
+    }
+
+    private var isCollectingAdditionalAppsDuringDrag: Bool {
+        draggedBundleIdentifier != nil
+    }
+
+    private var hasCollectedAdditionalAppsDuringDrag: Bool {
+        !draggedAdditionalTileIDs.isEmpty
     }
 
     private var draggedTilePosition: CGPoint {
@@ -737,6 +821,20 @@ struct TileContainerView: View {
         layout.scaled(preferences.tileSpacing)
     }
 
+    private var dragPreviewStackTileChromeInset: CGFloat {
+        floor(effectiveTileSize * 3 / 32)
+    }
+
+    private func dragPreviewStackRotationDegrees(for depth: Int) -> Double {
+        let magnitude = Double(depth) * 12.5
+        return depth.isMultiple(of: 2) ? magnitude : -magnitude
+    }
+    
+    private func dragPreviewStackOffset(for depth: Int) -> Double {
+        let magnitude = Double(depth) * 2.5
+        return depth.isMultiple(of: 2) ? magnitude : -magnitude
+    }
+
     private var tileHeight: CGFloat {
         let iconHeight = layout.scaled(dockSettings.magnification ? dockSettings.largeSize : dockSettings.tileSize)
         return iconHeight + layout.scaled(preferences.tileVerticalPadding) * 2
@@ -875,12 +973,22 @@ struct TileContainerView: View {
         return isTrailingReorderable(tileID: draggedTileID)
     }
 
-    private func shouldHideDraggedOriginalTile(tileID: String) -> Bool {
+    private func isHiddenForActiveDrag(tileID: String) -> Bool {
+        if draggedAdditionalTileIDs.contains(tileID) {
+            return true
+        }
+
         guard tileID == draggedTileID else {
             return false
         }
+
         return (!isDraggingPinnedTile && draggedPinnedTileDestinationIndex != nil)
             || (!isDraggingTrailingTile && draggedTrailingTileDestinationIndex != nil)
+            || draggedTileID == tileID
+    }
+
+    private func shouldHideDraggedOriginalTile(tileID: String) -> Bool {
+        isHiddenForActiveDrag(tileID: tileID)
     }
 
     private func canDropInPinnedSection(_ tile: Tile) -> Bool {
@@ -908,6 +1016,7 @@ struct TileContainerView: View {
 
         if draggedTileID == nil {
             draggedTileID = tile.id
+            draggedAdditionalTileIDs = []
             draggedTileInitialFrame = tileFrames[tile.id]
             draggedPinnedTileDestinationIndex = isPinnedReorderable(tileID: tile.id) ? pinnedTileIDs.firstIndex(of: tile.id) : nil
             draggedTrailingTileDestinationIndex = isTrailingReorderable(tileID: tile.id) ? trailingTileIDs.firstIndex(of: tile.id) : nil
@@ -918,17 +1027,23 @@ struct TileContainerView: View {
         }
 
         draggedTileOffset = projected(size: value.translation)
+        draggedPickupCandidateTileID = dragPickupCandidateTileID(at: value.location)
 
-        if let bundleIdentifier = bundleIdentifier(for: tile),
+        if !draggedSelectionBundleIdentifiers.isEmpty,
            let groupTargetTileID = appFolderDropTargetTileID(
-               at: value.location,
-               sourceTileID: tile.id,
-               bundleIdentifier: bundleIdentifier
-            ) {
+                at: value.location,
+                selectedTileIDs: draggedSelectionTileIDs,
+                selectedBundleIdentifiers: draggedSelectionBundleIdentifiers
+             ) {
             draggedAppFolderTargetTileID = groupTargetTileID
             draggedPinnedTileDestinationIndex = nil
             draggedTrailingTileDestinationIndex = nil
             editMode.paletteDropDestination = nil
+            return
+        }
+
+        if hasCollectedAdditionalAppsDuringDrag {
+            clearDragPreviewDestinations()
             return
         }
 
@@ -952,8 +1067,10 @@ struct TileContainerView: View {
         }
 
         if let groupTargetTileID = draggedAppFolderTargetTileID,
-           let bundleIdentifier = draggedBundleIdentifier {
-            _ = store.groupApp(bundleIdentifier: bundleIdentifier, intoTileID: groupTargetTileID)
+           !draggedSelectionBundleIdentifiers.isEmpty {
+            _ = store.groupApps(bundleIdentifiers: draggedSelectionBundleIdentifiers, intoTileID: groupTargetTileID)
+        } else if hasCollectedAdditionalAppsDuringDrag {
+            // Multi-app pickup is only used for grouping into an app or folder target.
         } else if isPinnedReorderable(tileID: tile.id) {
             if let destinationIndex = draggedTrailingTileDestinationIndex,
                let trailingItem = draggedTile.flatMap(store.makeTrailingItem(from:)) {
@@ -991,6 +1108,40 @@ struct TileContainerView: View {
             return nil
         }
         return app.bundleIdentifier
+    }
+
+    private func handleDragKeyDown(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+              event.charactersIgnoringModifiers == " " else {
+            return false
+        }
+
+        return grabPickupCandidateDuringActiveDrag()
+    }
+
+    private func grabPickupCandidateDuringActiveDrag() -> Bool {
+        guard isCollectingAdditionalAppsDuringDrag,
+              let pickupCandidateTileID = draggedPickupCandidateTileID,
+              let bundleIdentifier = bundleIdentifier(forTileID: pickupCandidateTileID),
+              !draggedSelectionTileIDs.contains(pickupCandidateTileID),
+              !draggedSelectionBundleIdentifiers.contains(bundleIdentifier) else {
+            return false
+        }
+
+        withAnimation(tileMutationAnimation) {
+            draggedAdditionalTileIDs.append(pickupCandidateTileID)
+            draggedPickupCandidateTileID = nil
+            clearDragPreviewDestinations()
+        }
+        return true
+    }
+
+    private func clearDragPreviewDestinations() {
+        draggedAppFolderTargetTileID = nil
+        draggedPinnedTileDestinationIndex = nil
+        draggedTrailingTileDestinationIndex = nil
+        editMode.paletteDropDestination = nil
     }
 
     private func updatePreviewDestination(
@@ -1298,6 +1449,8 @@ struct TileContainerView: View {
         draggedPinnedTileDestinationIndex = nil
         draggedTrailingTileDestinationIndex = nil
         draggedAppFolderTargetTileID = nil
+        draggedAdditionalTileIDs = []
+        draggedPickupCandidateTileID = nil
     }
 
     private func bundleIdentifier(for tile: Tile) -> String? {
@@ -1307,17 +1460,31 @@ struct TileContainerView: View {
         return app.bundleIdentifier.isEmpty ? nil : app.bundleIdentifier
     }
 
-    private func appFolderDropTargetTileID(at location: CGPoint, sourceTileID: String, bundleIdentifier: String) -> String? {
-        for tile in previewPinnedBaseTiles where tile.id != sourceTileID {
+    private func bundleIdentifier(forTileID tileID: String) -> String? {
+        guard let tile = store.tiles.first(where: { $0.id == tileID }) else {
+            return nil
+        }
+
+        return bundleIdentifier(for: tile)
+    }
+
+    private func appFolderDropTargetTileID(
+        at location: CGPoint,
+        selectedTileIDs: Set<String>,
+        selectedBundleIdentifiers: [String]
+    ) -> String? {
+        let selectedBundleIdentifierSet = Set(selectedBundleIdentifiers)
+
+        for tile in previewPinnedBaseTiles where !selectedTileIDs.contains(tile.id) {
             switch tile.content {
             case .app(let app):
-                guard app.bundleIdentifier != bundleIdentifier else {
+                guard !selectedBundleIdentifierSet.contains(app.bundleIdentifier) else {
                     continue
                 }
             case .minimizedWindow:
                 continue
             case .appFolder(let folder):
-                guard !folder.bundleIdentifiers.contains(bundleIdentifier) else {
+                guard folder.bundleIdentifiers.allSatisfy({ !selectedBundleIdentifierSet.contains($0) }) else {
                     continue
                 }
             case .launchpad, .widget, .smartStack, .folder, .spacer, .divider, .trash:
@@ -1325,6 +1492,30 @@ struct TileContainerView: View {
             }
 
             guard let frame = tileFrames[tile.id] else {
+                continue
+            }
+
+            let targetFrame = frame.insetBy(dx: frame.width * 0.18, dy: frame.height * 0.18)
+            if targetFrame.contains(location) {
+                return tile.id
+            }
+        }
+
+        return nil
+    }
+
+    private func dragPickupCandidateTileID(at location: CGPoint) -> String? {
+        guard isCollectingAdditionalAppsDuringDrag else {
+            return nil
+        }
+
+        let selectedBundleIdentifiers = Set(draggedSelectionBundleIdentifiers)
+
+        for tile in displayTiles.reversed() {
+            guard !draggedSelectionTileIDs.contains(tile.id),
+                  let bundleIdentifier = bundleIdentifier(for: tile),
+                  !selectedBundleIdentifiers.contains(bundleIdentifier),
+                  let frame = tileFrames[tile.id] else {
                 continue
             }
 
@@ -1508,5 +1699,54 @@ private struct TileFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private struct TileDragKeyMonitor: NSViewRepresentable {
+    let keyDownHandler: (NSEvent) -> Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(keyDownHandler: keyDownHandler)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.keyDownHandler = keyDownHandler
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        var keyDownHandler: (NSEvent) -> Bool
+        private var eventMonitor: Any?
+
+        init(keyDownHandler: @escaping (NSEvent) -> Bool) {
+            self.keyDownHandler = keyDownHandler
+        }
+
+        func start() {
+            guard eventMonitor == nil else { return }
+            eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else { return event }
+                return self.keyDownHandler(event) ? nil : event
+            }
+        }
+
+        func stop() {
+            guard let eventMonitor else { return }
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+
+        deinit {
+            stop()
+        }
     }
 }
