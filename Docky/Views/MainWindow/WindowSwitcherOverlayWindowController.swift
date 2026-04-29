@@ -338,7 +338,7 @@ private struct WindowSwitcherCard: View {
 
     private var previewSurface: some View {
         Group {
-            if let preview = workspace.appWindowPreview(for: window) {
+            if let preview = switcher.windowPreview(for: window) {
                 Image(nsImage: preview)
                     .resizable()
                     .interpolation(.high)

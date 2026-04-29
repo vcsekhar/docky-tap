@@ -18,6 +18,7 @@ final class WindowSwitcherService: ObservableObject {
 
     @Published private(set) var isPresented = false
     @Published private(set) var windows: [AppWindow] = []
+    @Published private(set) var windowPreviews: [String: NSImage] = [:]
     @Published private(set) var selectedWindowIdentifier: String?
     @Published private(set) var isContextMenuPresented = false
     @Published private(set) var focusedPreview: FocusedWindowPreview?
@@ -55,6 +56,7 @@ final class WindowSwitcherService: ObservableObject {
         registerHotKey(shortcut: DockyPreferences.shared.windowSwitcherShortcut)
         installEventMonitors()
         subscribeToPreferences()
+        observeWindowPreviews()
     }
 
     deinit {
@@ -81,7 +83,12 @@ final class WindowSwitcherService: ObservableObject {
             return
         }
 
-        if isPresented, usesInstantFocusPreview {
+        if isPresented {
+            guard !windows.isEmpty else {
+                dismiss()
+                return
+            }
+
             moveSelection(delta: direction)
             return
         }
@@ -97,35 +104,8 @@ final class WindowSwitcherService: ObservableObject {
             return
         }
 
-        let previousSelectionIdentifier = selectedWindowIdentifier
-        let currentState = windows.map(\.windowIdentifier)
-        let nextState = latestWindows.map(\.windowIdentifier)
-        let symmetricDifference = Set(windows.map(\.windowIdentifier))
-            .symmetricDifference(Set(latestWindows.map(\.windowIdentifier)))
-            .sorted()
-        if !symmetricDifference.isEmpty {
-            let currentSummary = currentState.isEmpty ? "  <empty>" : currentState.map { "  - \($0)" }.joined(separator: "\n")
-            let nextSummary = nextState.isEmpty ? "  <empty>" : nextState.map { "  - \($0)" }.joined(separator: "\n")
-            let diffSummary = symmetricDifference.isEmpty ? "  <empty>" : symmetricDifference.map { "  - \($0)" }.joined(separator: "\n")
-            NSLog(
-                "[Docky] Window switcher state changed\ncount=%d\nselected=%@\nsymmetricDiff:\n%@\ncurrent:\n%@\nnext:\n%@",
-                latestWindows.count,
-                previousSelectionIdentifier ?? "nil",
-                diffSummary,
-                currentSummary,
-                nextSummary
-            )
-            windows = latestWindows
-        }
-
-        if isPresented {
-            let currentIndex = previousSelectionIdentifier.flatMap { identifier in
-                latestWindows.firstIndex { $0.windowIdentifier == identifier }
-            } ?? 0
-            selectWindow(at: currentIndex + direction)
-            return
-        }
-
+        windows = latestWindows
+        freezeWindowPreviews(for: latestWindows)
         isPresented = true
         let initialIndex: Int
         if latestWindows.count <= 1 {
@@ -158,6 +138,7 @@ final class WindowSwitcherService: ObservableObject {
         isPresented = false
         isContextMenuPresented = false
         windows = []
+        windowPreviews = [:]
         selectedWindowIdentifier = nil
     }
 
@@ -206,6 +187,7 @@ final class WindowSwitcherService: ObservableObject {
         }
 
         windows.remove(at: removedIndex)
+        windowPreviews.removeValue(forKey: identifier)
 
         guard !windows.isEmpty else {
             dismiss()
@@ -259,6 +241,15 @@ final class WindowSwitcherService: ObservableObject {
                 guard let self else { return }
 
                 self.refreshSelectionPresentation()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func observeWindowPreviews() {
+        WorkspaceService.shared.$appWindowPreviews
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] previews in
+                self?.mergeWindowPreviews(previews)
             }
             .store(in: &cancellables)
     }
@@ -330,6 +321,45 @@ final class WindowSwitcherService: ObservableObject {
 
         let wrappedIndex = ((index % windows.count) + windows.count) % windows.count
         selectWindow(withIdentifier: windows[wrappedIndex].windowIdentifier)
+    }
+
+    private func freezeWindowPreviews(for windows: [AppWindow]) {
+        var previews: [String: NSImage] = [:]
+
+        for window in windows {
+            if let preview = WorkspaceService.shared.appWindowPreview(for: window) {
+                previews[window.windowIdentifier] = preview
+            }
+        }
+
+        windowPreviews = previews
+    }
+
+    private func mergeWindowPreviews(_ previews: [String: NSImage]) {
+        guard isPresented, !windows.isEmpty else {
+            return
+        }
+
+        var updatedPreviews = windowPreviews
+        var didChange = false
+
+        for window in windows {
+            guard updatedPreviews[window.windowIdentifier] == nil,
+                  let preview = previews[window.windowIdentifier] else {
+                continue
+            }
+
+            updatedPreviews[window.windowIdentifier] = preview
+            didChange = true
+        }
+
+        if didChange {
+            windowPreviews = updatedPreviews
+        }
+    }
+
+    func windowPreview(for window: AppWindow) -> NSImage? {
+        windowPreviews[window.windowIdentifier]
     }
 
     private func cancelFocusedPreview() {
