@@ -29,6 +29,8 @@ struct TileContainerView: View {
     @State private var draggedPickupCandidateTileID: String?
     @State private var externalAppDropDestinationIndex: Int?
     @State private var externalFolderDropDestinationIndex: Int?
+    @State private var externalDocumentDropTargetTileID: String?
+    @State private var lastExternalFileDropLocation: CGPoint?
     @State private var tileFrames: [String: CGRect] = [:]
 
     var body: some View {
@@ -51,49 +53,68 @@ struct TileContainerView: View {
                 },
                 clearPreview: {
                     editMode.endPaletteDrag()
-                    externalAppDropDestinationIndex = nil
-                    externalFolderDropDestinationIndex = nil
+                    clearExternalFileDropState()
                 },
                 performInsert: { providers in
                     if providers.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
-                        if let destinationIndex = externalAppDropDestinationIndex {
-                            resolveDroppedURLs(from: providers) { itemURLs in
-                                let bundleIdentifiers = itemURLs.compactMap(bundleIdentifierForDroppedApp(from:))
-                                guard !bundleIdentifiers.isEmpty else { return }
-                                DispatchQueue.main.async {
+                        let documentTargetBundleIdentifier = externalDocumentDropTargetTileID.flatMap(appDocumentDropBundleIdentifier(forTileID:))
+                        let appDestinationIndex = externalAppDropDestinationIndex ?? inferredExternalAppDropDestinationIndex()
+                        let folderDestinationIndex = externalFolderDropDestinationIndex
+
+                        resolveDroppedURLs(from: providers) { itemURLs in
+                            let droppedAppBundleIdentifiers = itemURLs.compactMap(bundleIdentifierForDroppedApp(from:))
+                            let containsOnlyApps = !itemURLs.isEmpty && droppedAppBundleIdentifiers.count == itemURLs.count
+
+                            DispatchQueue.main.async {
+                                if containsOnlyApps {
+                                    guard let destinationIndex = appDestinationIndex,
+                                          !droppedAppBundleIdentifiers.isEmpty else {
+                                        clearExternalFileDropState()
+                                        return
+                                    }
+
                                     var insertionIndex = destinationIndex
-                                for bundleIdentifier in bundleIdentifiers {
-                                    _ = TileStore.shared.pinApp(bundleIdentifier: bundleIdentifier, at: insertionIndex)
+                                    for bundleIdentifier in droppedAppBundleIdentifiers {
+                                        _ = TileStore.shared.pinApp(bundleIdentifier: bundleIdentifier, at: insertionIndex)
+                                        insertionIndex += 1
+                                    }
+                                    clearExternalFileDropState()
+                                    return
+                                }
+
+                                if let bundleIdentifier = documentTargetBundleIdentifier {
+                                    let openableURLs = itemURLs.filter { !isDroppableApp($0) }
+                                    guard !openableURLs.isEmpty else {
+                                        clearExternalFileDropState()
+                                        return
+                                    }
+
+                                    WorkspaceService.shared.open(fileURLs: openableURLs, withApplicationBundleIdentifier: bundleIdentifier)
+                                    clearExternalFileDropState()
+                                    return
+                                }
+
+                                guard let destinationIndex = folderDestinationIndex else {
+                                    clearExternalFileDropState()
+                                    return
+                                }
+
+                                let folderItems = itemURLs.compactMap(makeTrailingFolderItem(from:))
+                                guard !folderItems.isEmpty else {
+                                    clearExternalFileDropState()
+                                    return
+                                }
+
+                                var insertionIndex = destinationIndex
+                                for folderItem in folderItems {
+                                    TileStore.shared.insertTrailingItem(folderItem, at: insertionIndex)
                                     insertionIndex += 1
                                 }
-                                externalAppDropDestinationIndex = nil
-                                externalFolderDropDestinationIndex = nil
+                                clearExternalFileDropState()
                             }
                         }
                         return true
                     }
-
-                        guard let destinationIndex = externalFolderDropDestinationIndex else {
-                            externalAppDropDestinationIndex = nil
-                            externalFolderDropDestinationIndex = nil
-                            return false
-                        }
-
-                            resolveDroppedURLs(from: providers) { itemURLs in
-                                let folderItems = itemURLs.compactMap(makeTrailingFolderItem(from:))
-                                guard !folderItems.isEmpty else { return }
-                                DispatchQueue.main.async {
-                                    var insertionIndex = destinationIndex
-                                for folderItem in folderItems {
-                                    TileStore.shared.insertTrailingItem(folderItem, at: insertionIndex)
-                                    insertionIndex += 1
-                                    }
-                                    externalAppDropDestinationIndex = nil
-                                    externalFolderDropDestinationIndex = nil
-                                }
-                            }
-                            return true
-                        }
 
                     guard let paletteDrag = editMode.paletteDrag,
                           let destination = editMode.paletteDropDestination else {
@@ -255,7 +276,7 @@ struct TileContainerView: View {
             position: position,
             compactWidgets: layout.compactsWidgetsForOverflow
         )
-        TileView(tile: tile)
+        TileView(tile: tile, isExternalFileDropTargeted: externalDocumentDropTargetTileID == tile.id)
             .frame(width: size.width, height: size.height)
             .opacity(isHiddenForActiveDrag(tileID: tile.id) ? 0 : 1)
             .background(alignment: .topLeading) {
@@ -1295,9 +1316,28 @@ struct TileContainerView: View {
     }
 
     private func updateExternalFilePreviewDestination(info: DropInfo, at location: CGPoint) {
-        let positionValue = projected(point: location)
+        lastExternalFileDropLocation = location
+        let providers = info.itemProviders(for: [UTType.fileURL])
+        if let targetTileID = appDocumentDropTargetTileID(for: location, providers: providers) {
+            guard targetTileID != externalDocumentDropTargetTileID
+                    || externalAppDropDestinationIndex != nil
+                    || externalFolderDropDestinationIndex != nil else {
+                return
+            }
 
-        if isPointInPinnedDropRegion(positionValue) {
+            withAnimation(tileMutationAnimation) {
+                externalDocumentDropTargetTileID = targetTileID
+                externalAppDropDestinationIndex = nil
+                externalFolderDropDestinationIndex = nil
+            }
+            return
+        }
+
+        externalDocumentDropTargetTileID = nil
+        let positionValue = projected(point: location)
+        let shouldPreviewPinnedAppDrop = containsOnlyLikelyApplicationBundleProviders(providers)
+
+        if shouldPreviewPinnedAppDrop && isPointInPinnedDropRegion(positionValue) {
             let visibleTiles = previewPinnedBaseTiles
             let destinationIndex = visibleTiles.enumerated().first { _, tile in
                 guard let frame = tileFrames[tile.id] else {
@@ -1318,10 +1358,10 @@ struct TileContainerView: View {
             return
         }
 
-        guard isPointInTrailingDropRegion(positionValue) else {
+        guard !shouldPreviewPinnedAppDrop,
+              isPointInTrailingDropRegion(positionValue) else {
             withAnimation(tileMutationAnimation) {
-                externalAppDropDestinationIndex = nil
-                externalFolderDropDestinationIndex = nil
+                clearExternalFileDropState()
             }
             return
         }
@@ -1342,6 +1382,99 @@ struct TileContainerView: View {
         withAnimation(tileMutationAnimation) {
             externalAppDropDestinationIndex = nil
             externalFolderDropDestinationIndex = destinationIndex
+        }
+    }
+
+    private func clearExternalFileDropState() {
+        externalAppDropDestinationIndex = nil
+        externalFolderDropDestinationIndex = nil
+        externalDocumentDropTargetTileID = nil
+        lastExternalFileDropLocation = nil
+    }
+
+    private func inferredExternalAppDropDestinationIndex() -> Int? {
+        guard let location = lastExternalFileDropLocation else {
+            return nil
+        }
+
+        let positionValue = projected(point: location)
+        guard isPointInPinnedDropRegion(positionValue) else {
+            return nil
+        }
+
+        let visibleTiles = previewPinnedBaseTiles
+        return visibleTiles.enumerated().first { _, tile in
+            guard let frame = tileFrames[tile.id] else {
+                return false
+            }
+            let midpoint = projected(point: frame.origin) + projected(size: frame.size) / 2
+            return positionValue < midpoint
+        }?.offset ?? visibleTiles.count
+    }
+
+    private func appDocumentDropTargetTileID(for location: CGPoint, providers: [NSItemProvider]) -> String? {
+        guard containsNonAppFileProvider(providers) else {
+            return nil
+        }
+
+        for tile in displayTiles.reversed() {
+            guard appDocumentDropBundleIdentifier(for: tile) != nil,
+                  let frame = tileFrames[tile.id],
+                  frame.contains(location) else {
+                continue
+            }
+
+            return tile.id
+        }
+
+        return nil
+    }
+
+    private func appDocumentDropBundleIdentifier(forTileID tileID: String) -> String? {
+        guard let tile = displayTiles.first(where: { $0.id == tileID }) else {
+            return nil
+        }
+
+        return appDocumentDropBundleIdentifier(for: tile)
+    }
+
+    private func appDocumentDropBundleIdentifier(for tile: Tile) -> String? {
+        guard !editMode.isActive,
+              case .app(let app) = tile.content,
+              app.displayedWidget == nil,
+              !app.bundleIdentifier.isEmpty else {
+            return nil
+        }
+
+        return app.bundleIdentifier
+    }
+
+    private func containsOnlyLikelyApplicationBundleProviders(_ providers: [NSItemProvider]) -> Bool {
+        let fileURLProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !fileURLProviders.isEmpty else {
+            return false
+        }
+
+        return fileURLProviders.allSatisfy(isLikelyApplicationBundleProvider(_:))
+    }
+
+    private func containsNonAppFileProvider(_ providers: [NSItemProvider]) -> Bool {
+        providers
+            .filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+            .contains { !isLikelyApplicationBundleProvider($0) }
+    }
+
+    private func isLikelyApplicationBundleProvider(_ provider: NSItemProvider) -> Bool {
+        if let suggestedName = provider.suggestedName,
+           suggestedName.lowercased().hasSuffix(".app") {
+            return true
+        }
+
+        return provider.registeredTypeIdentifiers.contains { identifier in
+            guard let type = UTType(identifier) else {
+                return false
+            }
+            return type.conforms(to: .application)
         }
     }
 

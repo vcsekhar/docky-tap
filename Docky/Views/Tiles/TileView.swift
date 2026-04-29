@@ -7,14 +7,12 @@
 //
 
 import AppKit
-import OSLog
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct TileView: View {
-    private static let logger = Logger(subsystem: "gt.quintero.Docky", category: "TileFileDrop")
     let tile: Tile
     let isDragging: Bool
+    let isExternalFileDropTargeted: Bool
     @ObservedObject private var dockSettings = DockSettingsService.shared
     @ObservedObject private var layout = DockLayoutService.shared
     @ObservedObject private var preferences = DockyPreferences.shared
@@ -29,16 +27,16 @@ struct TileView: View {
     @State private var isAppFolderPopoverPresented = false
     @State private var isAppFolderListMenuPresented = false
     @State private var isContextMenuPresented = false
-    @State private var isFileDropTargeted = false
     @State private var folderSnapshot: FolderContentsSnapshot = .loaded([])
     @State private var lastFolderPopoverDismissedAt: TimeInterval = 0
 
     private static let finderBundleIdentifier = "com.apple.finder"
     private static let folderPopoverRetapGuardInterval: TimeInterval = 0.25
 
-    init(tile: Tile, isDragging: Bool = false) {
+    init(tile: Tile, isDragging: Bool = false, isExternalFileDropTargeted: Bool = false) {
         self.tile = tile
         self.isDragging = isDragging
+        self.isExternalFileDropTargeted = isExternalFileDropTargeted
         self._dockSettings = ObservedObject(wrappedValue: DockSettingsService.shared)
         self._layout = ObservedObject(wrappedValue: DockLayoutService.shared)
         self._preferences = ObservedObject(wrappedValue: DockyPreferences.shared)
@@ -342,32 +340,30 @@ struct TileView: View {
     }
 
     var body: some View {
-        appDocumentDropTarget(
-            laidOutContent
-                .opacity(isLockedProductPlacement ? 0.38 : 1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .overlay(alignment: runningIndicatorAlignment) {
-                    runningIndicator
-                        .padding(runningIndicatorEdge, runningIndicatorInset)
-                        .offset(y: -max((layout.scaled(preferences.tileVerticalPadding) / 2), 2))
+        laidOutContent
+            .opacity(isLockedProductPlacement ? 0.38 : 1)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .overlay(alignment: runningIndicatorAlignment) {
+                runningIndicator
+                    .padding(runningIndicatorEdge, runningIndicatorInset)
+                    .offset(y: -max((layout.scaled(preferences.tileVerticalPadding) / 2), 2))
+            }
+            .overlay {
+                if isLockedProductPlacement {
+                    LockedProductTileOverlay()
+                        .allowsHitTesting(false)
                 }
-                .overlay {
-                    if isLockedProductPlacement {
-                        LockedProductTileOverlay()
-                            .allowsHitTesting(false)
-                    }
+            }
+            .overlay {
+                if isExternalFileDropTargeted {
+                    laidOutContent
+                        .disabled(true)
+                        .colorMultiply(.black.opacity(0.25))
                 }
-                .overlay {
-                    if isFileDropTargeted {
-                        laidOutContent
-                            .disabled(true)
-                            .colorMultiply(.black.opacity(0.25))
-                    }
-                }
-                .contentShape(Rectangle())
-                .onHover(perform: updateHoverState)
-                .onTapGesture(perform: handleTap)
-        )
+            }
+            .contentShape(Rectangle())
+            .onHover(perform: updateHoverState)
+            .onTapGesture(perform: handleTap)
             .onDisappear {
                 isHovering = false
                 isTooltipPresented = false
@@ -376,7 +372,6 @@ struct TileView: View {
                 isAppFolderPopoverPresented = false
                 isAppFolderListMenuPresented = false
                 isContextMenuPresented = false
-                isFileDropTargeted = false
             }
             .onChange(of: isFolderPopoverPresented) { _, isPresented in
                 updateTooltipPresentation()
@@ -455,24 +450,6 @@ struct TileView: View {
                     }
                 }
             }
-    }
-
-    @ViewBuilder
-    private func appDocumentDropTarget<Content: View>(_ content: Content) -> some View {
-        if appDocumentDropBundleIdentifier != nil {
-            content.onDrop(of: [UTType.fileURL], delegate: AppDocumentDropDelegate(
-                canHandleDrop: canHandleAppDocumentDrop(providers:),
-                logEvent: { message in
-                    Self.logger.debug(
-                        "App tile drop delegate tile=\(tile.id, privacy: .public) message=\(message, privacy: .public)"
-                    )
-                },
-                updateIsTargeted: { isFileDropTargeted = $0 },
-                performDrop: handleAppDocumentDrop(providers:)
-            ))
-        } else {
-            content
-        }
     }
 
     @ViewBuilder
@@ -910,133 +887,6 @@ struct TileView: View {
         case .spacer, .divider:
             return
         }
-    }
-
-    private var appDocumentDropBundleIdentifier: String? {
-        guard !editMode.isActive,
-              case .app(let app) = tile.content,
-              app.displayedWidget == nil,
-              !app.bundleIdentifier.isEmpty else {
-            return nil
-        }
-
-        return app.bundleIdentifier
-    }
-
-    private func canHandleAppDocumentDrop(providers: [NSItemProvider]) -> Bool {
-        guard appDocumentDropBundleIdentifier != nil else {
-            return false
-        }
-
-        let fileURLProviders = providers.filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-        }
-        guard !fileURLProviders.isEmpty else {
-            return false
-        }
-
-        let containsNonAppFile = fileURLProviders.contains { !isLikelyApplicationBundleProvider($0) }
-        let providerSummary = fileURLProviders.map(fileDropProviderDescription).joined(separator: ",")
-        Self.logger.debug(
-            "App tile drop eligibility tile=\(tile.id, privacy: .public) bundleIdentifier=\(appDocumentDropBundleIdentifier ?? "nil", privacy: .public) providerCount=\(fileURLProviders.count, privacy: .public) containsNonAppFile=\(containsNonAppFile, privacy: .public) providers=\(providerSummary, privacy: .public)"
-        )
-        return containsNonAppFile
-    }
-
-    private func handleAppDocumentDrop(providers: [NSItemProvider]) -> Bool {
-        guard canHandleAppDocumentDrop(providers: providers),
-              let bundleIdentifier = appDocumentDropBundleIdentifier else {
-            return false
-        }
-
-        let fileURLProviders = providers.filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-        }
-        guard !fileURLProviders.isEmpty else {
-            return false
-        }
-
-        Self.logger.info(
-            "App tile accepted drop tile=\(tile.id, privacy: .public) bundleIdentifier=\(bundleIdentifier, privacy: .public) providerCount=\(fileURLProviders.count, privacy: .public)"
-        )
-
-        resolveDroppedFileURLs(from: fileURLProviders) { droppedURLs in
-            let openableURLs = droppedURLs.filter { !isApplicationBundleURL($0) }
-            guard !openableURLs.isEmpty else {
-                Self.logger.info(
-                    "App tile drop resolved only app bundles tile=\(self.tile.id, privacy: .public) resolvedURLs=\(droppedURLs.map(\.path).joined(separator: ","), privacy: .public)"
-                )
-                return
-            }
-
-            Self.logger.info(
-                "App tile opening dropped files tile=\(self.tile.id, privacy: .public) bundleIdentifier=\(bundleIdentifier, privacy: .public) resolvedURLs=\(droppedURLs.map(\.path).joined(separator: ","), privacy: .public) openableURLs=\(openableURLs.map(\.path).joined(separator: ","), privacy: .public)"
-            )
-
-            DispatchQueue.main.async {
-                WorkspaceService.shared.open(fileURLs: openableURLs, withApplicationBundleIdentifier: bundleIdentifier)
-            }
-        }
-
-        return true
-    }
-
-    private func isLikelyApplicationBundleProvider(_ provider: NSItemProvider) -> Bool {
-        if let suggestedName = provider.suggestedName,
-           suggestedName.lowercased().hasSuffix(".app") {
-            return true
-        }
-
-        return provider.registeredTypeIdentifiers.contains { identifier in
-            guard let type = UTType(identifier) else {
-                return false
-            }
-            return type.conforms(to: .application)
-        }
-    }
-
-    private func fileDropProviderDescription(_ provider: NSItemProvider) -> String {
-        let suggestedName = provider.suggestedName ?? "nil"
-        let isLikelyApp = isLikelyApplicationBundleProvider(provider)
-        return "name=\(suggestedName) app=\(isLikelyApp) types=\(provider.registeredTypeIdentifiers.joined(separator: "|"))"
-    }
-
-    private func resolveDroppedFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
-        let dispatchGroup = DispatchGroup()
-        let lock = NSLock()
-        var resolvedURLs: [URL] = []
-
-        for provider in providers {
-            dispatchGroup.enter()
-            provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
-                defer { dispatchGroup.leave() }
-                guard let data, let url = URL(dataRepresentation: data, relativeTo: nil) else {
-                    return
-                }
-
-                lock.lock()
-                resolvedURLs.append(url.standardizedFileURL.resolvingSymlinksInPath())
-                lock.unlock()
-            }
-        }
-
-        dispatchGroup.notify(queue: .global(qos: .userInitiated)) {
-            completion(Array(Set(resolvedURLs)).sorted { $0.path < $1.path })
-        }
-    }
-
-    private func isApplicationBundleURL(_ url: URL) -> Bool {
-        guard url.isFileURL else {
-            return false
-        }
-
-        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .typeIdentifierKey])
-        guard values?.isDirectory == true, values?.isPackage == true else {
-            return false
-        }
-
-        return url.pathExtension.caseInsensitiveCompare("app") == .orderedSame
-            || values?.typeIdentifier == UTType.application.identifier
     }
 
     private func appFolderContextActions(for folder: AppFolderTile) -> [ContextAction] {
@@ -1663,55 +1513,6 @@ struct TileView: View {
         }
     }
 
-}
-
-private struct AppDocumentDropDelegate: DropDelegate {
-    let canHandleDrop: ([NSItemProvider]) -> Bool
-    let logEvent: (String) -> Void
-    let updateIsTargeted: (Bool) -> Void
-    let performDrop: ([NSItemProvider]) -> Bool
-
-    func validateDrop(info: DropInfo) -> Bool {
-        let providers = info.itemProviders(for: [UTType.fileURL])
-        let canHandle = canHandleDrop(providers)
-        logEvent("validate canHandle=\(canHandle) providerCount=\(providers.count)")
-        return canHandle
-    }
-
-    func dropEntered(info: DropInfo) {
-        let providers = info.itemProviders(for: [UTType.fileURL])
-        let canHandle = canHandleDrop(providers)
-        logEvent("entered canHandle=\(canHandle) providerCount=\(providers.count)")
-        updateIsTargeted(canHandle)
-    }
-
-    func dropExited(info: DropInfo) {
-        logEvent("exited")
-        updateIsTargeted(false)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        let providers = info.itemProviders(for: [UTType.fileURL])
-        guard canHandleDrop(providers) else {
-            logEvent("updated canHandle=false providerCount=\(providers.count)")
-            return nil
-        }
-
-        logEvent("updated canHandle=true providerCount=\(providers.count)")
-        return DropProposal(operation: .copy)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        updateIsTargeted(false)
-        let providers = info.itemProviders(for: [UTType.fileURL])
-        guard canHandleDrop(providers) else {
-            logEvent("perform canHandle=false providerCount=\(providers.count)")
-            return false
-        }
-
-        logEvent("perform canHandle=true providerCount=\(providers.count)")
-        return performDrop(providers)
-    }
 }
 
 private struct LockedProductTileOverlay: View {
