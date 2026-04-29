@@ -13,6 +13,16 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
     private let animationDuration: TimeInterval = 0.18
     private let preferences = DockyPreferences.shared
 
+    private var showsOverlayUI: Bool {
+        guard ProductService.shared.isUnlocked(.windowSwitcher),
+              preferences.showsWindowSwitcherFocusPreview,
+              preferences.windowSwitcherPreviewMode == .instantFocus else {
+            return true
+        }
+
+        return false
+    }
+
     init(mainWindow: MainWindow) {
         self.mainWindow = mainWindow
 
@@ -26,6 +36,7 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
         observeOverlayPresentation()
         observeMainWindow()
         observeSpaceBehavior()
+        observePreviewMode()
     }
 
     @available(*, unavailable)
@@ -61,6 +72,11 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
     private func presentOverlay() {
         guard let window else { return }
 
+        guard showsOverlayUI else {
+            configureHiddenWindowState()
+            return
+        }
+
         updateFrame()
         window.alphaValue = 1
         window.ignoresMouseEvents = false
@@ -69,6 +85,11 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
     }
 
     private func dismissOverlay() {
+        guard showsOverlayUI else {
+            configureHiddenWindowState()
+            return
+        }
+
         animateWindowAlpha(to: 0) { [weak self] in
             guard let self, let window = self.window else { return }
 
@@ -95,11 +116,36 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
             .store(in: &cancellables)
     }
 
+    private func observePreviewMode() {
+        Publishers.CombineLatest(
+            preferences.$showsWindowSwitcherFocusPreview,
+            preferences.$windowSwitcherPreviewMode
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _, _ in
+            self?.refreshOverlayPresentation()
+        }
+        .store(in: &cancellables)
+    }
+
     private func configureHiddenWindowState() {
         guard let window else { return }
 
         window.alphaValue = 0
         window.ignoresMouseEvents = true
+    }
+
+    private func refreshOverlayPresentation() {
+        guard WindowSwitcherService.shared.isPresented else {
+            configureHiddenWindowState()
+            return
+        }
+
+        if showsOverlayUI {
+            presentOverlay()
+        } else {
+            configureHiddenWindowState()
+        }
     }
 
     private func updateFrame() {

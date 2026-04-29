@@ -555,6 +555,29 @@ enum FolderTileContentViewMode: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum WindowSwitcherPreviewMode: String, CaseIterable, Codable, Identifiable {
+    case inPlace
+    case instantFocus
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .inPlace: "In Place"
+        case .instantFocus: "Instant Focus"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .inPlace:
+            "Hold on one selection to preview that window behind the switcher without changing focus until you release the shortcut."
+        case .instantFocus:
+            "Focus each selected window immediately while keeping the original cycling order frozen until you release the shortcut."
+        }
+    }
+}
+
 final class DockyPreferences: ObservableObject {
     static let shared = DockyPreferences()
 
@@ -830,6 +853,14 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// Which behavior Docky's window switcher should use when previewing the selected window.
+    @Published var windowSwitcherPreviewMode: WindowSwitcherPreviewMode {
+        didSet {
+            guard windowSwitcherPreviewMode != oldValue else { return }
+            defaults.set(windowSwitcherPreviewMode.rawValue, forKey: Keys.windowSwitcherPreviewMode)
+        }
+    }
+
     /// Docky-owned ordered pinned app bundle identifiers.
     @Published var pinnedAppBundleIdentifiers: [String] {
         didSet {
@@ -988,6 +1019,7 @@ final class DockyPreferences: ObservableObject {
         static let enablesWindowSwitcher = "docky.enablesWindowSwitcher"
         static let windowSwitcherShortcut = "docky.windowSwitcherShortcut"
         static let showsWindowSwitcherFocusPreview = "docky.showsWindowSwitcherFocusPreview"
+        static let windowSwitcherPreviewMode = "docky.windowSwitcherPreviewMode"
         static let pinnedAppBundleIdentifiers = "docky.pinnedAppBundleIdentifiers"
         static let pinnedItems = "docky.pinnedItems"
         static let widgetPlacements = "docky.widgetPlacements"
@@ -1025,6 +1057,7 @@ final class DockyPreferences: ObservableObject {
         static let enablesWindowSwitcher = true
         static let windowSwitcherShortcut = KeyboardShortcut(keyCode: 48, modifierFlags: [.option])
         static let showsWindowSwitcherFocusPreview = true
+        static let windowSwitcherPreviewMode: WindowSwitcherPreviewMode = .inPlace
         static let pinnedAppBundleIdentifiers: [String] = []
         static let pinnedItems: [PinnedTileItem] = []
         static let widgetPlacements: [WidgetPlacement] = []
@@ -1063,6 +1096,7 @@ final class DockyPreferences: ObservableObject {
         let storedEnablesWindowSwitcher = defaults.object(forKey: Keys.enablesWindowSwitcher) as? Bool
         let storedWindowSwitcherShortcut = defaults.data(forKey: Keys.windowSwitcherShortcut)
         let storedShowsWindowSwitcherFocusPreview = defaults.object(forKey: Keys.showsWindowSwitcherFocusPreview) as? Bool
+        let storedWindowSwitcherPreviewMode = defaults.string(forKey: Keys.windowSwitcherPreviewMode)
         let storedPinnedAppBundleIdentifiers = defaults.stringArray(forKey: Keys.pinnedAppBundleIdentifiers)
         let storedPinnedItems = defaults.data(forKey: Keys.pinnedItems)
         let storedWidgetPlacements = defaults.data(forKey: Keys.widgetPlacements)
@@ -1100,6 +1134,7 @@ final class DockyPreferences: ObservableObject {
         self.enablesWindowSwitcher = storedEnablesWindowSwitcher ?? DefaultValues.enablesWindowSwitcher
         self.windowSwitcherShortcut = Self.decodeKeyboardShortcut(from: storedWindowSwitcherShortcut) ?? DefaultValues.windowSwitcherShortcut
         self.showsWindowSwitcherFocusPreview = storedShowsWindowSwitcherFocusPreview ?? DefaultValues.showsWindowSwitcherFocusPreview
+        self.windowSwitcherPreviewMode = storedWindowSwitcherPreviewMode.flatMap(WindowSwitcherPreviewMode.init(rawValue:)) ?? DefaultValues.windowSwitcherPreviewMode
         self.pinnedAppBundleIdentifiers = initialPinnedAppBundleIdentifiers
         self.pinnedItems = initialPinnedItems
         self.widgetPlacements = Self.decodeWidgetPlacements(from: storedWidgetPlacements) ?? DefaultValues.widgetPlacements
@@ -1146,6 +1181,7 @@ final class DockyPreferences: ObservableObject {
         enablesWindowSwitcher = DefaultValues.enablesWindowSwitcher
         windowSwitcherShortcut = DefaultValues.windowSwitcherShortcut
         showsWindowSwitcherFocusPreview = DefaultValues.showsWindowSwitcherFocusPreview
+        windowSwitcherPreviewMode = DefaultValues.windowSwitcherPreviewMode
         appWidgetDisplays = DefaultValues.appWidgetDisplays
     }
 

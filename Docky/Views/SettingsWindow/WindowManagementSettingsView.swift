@@ -10,6 +10,16 @@ struct WindowManagementSettingsView: View {
     @ObservedObject private var product = ProductService.shared
     @State private var isRecordingShortcut = false
 
+    private var shortcutHelpText: String {
+        if product.isUnlocked(.windowSwitcher),
+           preferences.showsWindowSwitcherFocusPreview,
+           preferences.windowSwitcherPreviewMode == .instantFocus {
+            return "While the switcher is open, keep the shortcut modifiers held and tap the shortcut again to cycle. In Instant Focus mode, each step immediately focuses the next window and releasing the modifiers ends cycling."
+        }
+
+        return "While the switcher is open, keep the shortcut modifiers held and tap the shortcut again to cycle. Release the modifiers to focus the selected window."
+    }
+
     var body: some View {
         Form {
             Section("Window Switcher") {
@@ -46,24 +56,43 @@ struct WindowManagementSettingsView: View {
                         .disabled(!preferences.enablesWindowSwitcher)
                     }
 
-                    Text("While the switcher is open, keep the shortcut modifiers held and tap the shortcut again to cycle. Release the modifiers to focus the selected window.")
+                    Text(shortcutHelpText)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 4)
 
                 if !product.isUnlocked(.windowSwitcher) {
-                    Text("Docky Pro unlocks the selected-window preview and window context menus inside the switcher.")
+                    Text("Docky Pro unlocks switcher preview modes and window context menus inside the switcher.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Preview Selected Window In Place", isOn: $preferences.showsWindowSwitcherFocusPreview)
+                    Toggle("Enable Switcher Preview", isOn: $preferences.showsWindowSwitcherFocusPreview)
                         .font(.headline)
                         .disabled(!product.isUnlocked(.windowSwitcher) || !preferences.enablesWindowSwitcher)
 
-                    Text("After the current switcher selection stays put for a moment, darken the backdrop and draw that window at its on-screen position behind the switcher.")
+                    Text("Choose whether the switcher should stay purely overlaid, preview the selected window behind it, or focus each step immediately while cycling.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Preview Mode")
+                        .font(.headline)
+
+                    Picker("Preview Mode", selection: $preferences.windowSwitcherPreviewMode) {
+                        ForEach(WindowSwitcherPreviewMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(!product.isUnlocked(.windowSwitcher) || !preferences.enablesWindowSwitcher || !preferences.showsWindowSwitcherFocusPreview)
+
+                    Text(preferences.windowSwitcherPreviewMode.summary)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

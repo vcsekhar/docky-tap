@@ -33,6 +33,23 @@ final class WindowSwitcherService: ObservableObject {
     private let reverseHotKeyID = EventHotKeyID(signature: OSType(0x444B5957), id: 2)
     private var reverseHotKeyRef: EventHotKeyRef?
 
+    private var activePreviewMode: WindowSwitcherPreviewMode? {
+        guard ProductService.shared.isUnlocked(.windowSwitcher),
+              DockyPreferences.shared.showsWindowSwitcherFocusPreview else {
+            return nil
+        }
+
+        return DockyPreferences.shared.windowSwitcherPreviewMode
+    }
+
+    private var usesInPlacePreview: Bool {
+        activePreviewMode == .inPlace
+    }
+
+    private var usesInstantFocusPreview: Bool {
+        activePreviewMode == .instantFocus
+    }
+
     private init() {
         installHotKeyHandlerIfNeeded()
         registerHotKey(shortcut: DockyPreferences.shared.windowSwitcherShortcut)
@@ -61,6 +78,11 @@ final class WindowSwitcherService: ObservableObject {
     func handleHotKeyPress(direction: Int) {
         guard DockyPreferences.shared.enablesWindowSwitcher else {
             dismiss()
+            return
+        }
+
+        if isPresented, usesInstantFocusPreview {
+            moveSelection(delta: direction)
             return
         }
 
@@ -123,6 +145,11 @@ final class WindowSwitcherService: ObservableObject {
         }
 
         dismiss()
+
+        guard !usesInstantFocusPreview else {
+            return
+        }
+
         _ = WorkspaceService.shared.focus(window: selectedWindow)
     }
 
@@ -149,6 +176,12 @@ final class WindowSwitcherService: ObservableObject {
         }
 
         selectedWindowIdentifier = identifier
+
+        if usesInstantFocusPreview {
+            cancelFocusedPreview()
+            focusSelectedWindowImmediately(identifier: identifier)
+            return
+        }
 
         scheduleFocusedPreview(forWindowIdentifier: identifier)
     }
@@ -213,14 +246,19 @@ final class WindowSwitcherService: ObservableObject {
 
         DockyPreferences.shared.$showsWindowSwitcherFocusPreview
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] isEnabled in
+            .sink { [weak self] _ in
                 guard let self else { return }
 
-                if isEnabled, let selectedWindowIdentifier {
-                    self.scheduleFocusedPreview(forWindowIdentifier: selectedWindowIdentifier)
-                } else {
-                    self.cancelFocusedPreview()
-                }
+                self.refreshSelectionPresentation()
+            }
+            .store(in: &cancellables)
+
+        DockyPreferences.shared.$windowSwitcherPreviewMode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+
+                self.refreshSelectionPresentation()
             }
             .store(in: &cancellables)
     }
@@ -301,16 +339,41 @@ final class WindowSwitcherService: ObservableObject {
         focusedPreview = nil
     }
 
-    private func scheduleFocusedPreview(forWindowIdentifier identifier: String) {
-        let preferences = DockyPreferences.shared
+    private func refreshSelectionPresentation() {
+        guard let selectedWindowIdentifier else {
+            cancelFocusedPreview()
+            return
+        }
 
+        if usesInstantFocusPreview {
+            cancelFocusedPreview()
+            focusSelectedWindowImmediately(identifier: selectedWindowIdentifier)
+            return
+        }
+
+        if usesInPlacePreview {
+            scheduleFocusedPreview(forWindowIdentifier: selectedWindowIdentifier)
+        } else {
+            cancelFocusedPreview()
+        }
+    }
+
+    private func focusSelectedWindowImmediately(identifier: String) {
+        guard isPresented,
+              let window = windows.first(where: { $0.windowIdentifier == identifier }) else {
+            return
+        }
+
+        _ = WorkspaceService.shared.focus(window: window)
+    }
+
+    private func scheduleFocusedPreview(forWindowIdentifier identifier: String) {
         focusedPreviewTask?.cancel()
         focusedPreviewTask = nil
 
         focusedPreview = nil
 
-        guard preferences.showsWindowSwitcherFocusPreview,
-              ProductService.shared.isUnlocked(.windowSwitcher),
+        guard usesInPlacePreview,
               isPresented,
               !isContextMenuPresented,
               windows.contains(where: { $0.windowIdentifier == identifier }) else {
@@ -325,8 +388,7 @@ final class WindowSwitcherService: ObservableObject {
     }
 
     private func runFocusedPreviewLoop(forWindowIdentifier identifier: String) async {
-        guard DockyPreferences.shared.showsWindowSwitcherFocusPreview,
-              ProductService.shared.isUnlocked(.windowSwitcher),
+        guard usesInPlacePreview,
               isPresented,
               !isContextMenuPresented,
               selectedWindowIdentifier == identifier,
@@ -356,7 +418,7 @@ final class WindowSwitcherService: ObservableObject {
         guard !startedLivePreview else { return }
 
         while !Task.isCancelled {
-            guard DockyPreferences.shared.showsWindowSwitcherFocusPreview,
+            guard usesInPlacePreview,
                   isPresented,
                   !isContextMenuPresented,
                   selectedWindowIdentifier == identifier,
