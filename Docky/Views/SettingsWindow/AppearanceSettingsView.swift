@@ -154,7 +154,7 @@ struct AppearanceSettingsView: View {
                             .frame(width: 48, alignment: .trailing)
                     }
 
-                    Text("Seeded from the macOS Dock when you sync, then adjusted locally for Docky without writing back to the system Dock.")
+                    Text("Controls the base width and height of each dock tile.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -164,33 +164,33 @@ struct AppearanceSettingsView: View {
                     Toggle("Magnification", isOn: systemDockMagnificationBinding)
                         .font(.headline)
 
-                    Text("Seeded from the macOS Dock when you sync, then adjusted locally for Docky without writing back to the system Dock.")
+                    Text("Allows tiles to use the enlarged dock sizing behavior when enabled.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 4)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Magnified Size")
-                        .font(.headline)
-
-                    HStack {
-                        Slider(value: systemDockLargeSizeBinding, in: max(16, Double(dockSettings.tileSize.rounded()))...192, step: 1) {
-                            Text("Magnified Size")
-                        }
-                        .labelsHidden()
-
-                        Text("\(Int(dockSettings.largeSize.rounded())) pt")
-                            .foregroundStyle(.secondary)
-                            .frame(width: 48, alignment: .trailing)
-                    }
-
-                    Text("Sets Docky's larger icon size after the last system Dock sync, without writing back to the system Dock.")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
-                .disabled(!dockSettings.magnification)
+//                VStack(alignment: .leading, spacing: 8) {
+//                    Text("Magnified Size")
+//                        .font(.headline)
+//
+//                    HStack {
+//                        Slider(value: systemDockLargeSizeBinding, in: Double(dockSettings.tileSize.rounded() + 1)...192, step: 1) {
+//                            Text("Magnified Size")
+//                        }
+//                        .labelsHidden()
+//
+//                        Text("\(Int(dockSettings.largeSize.rounded())) pt")
+//                            .foregroundStyle(.secondary)
+//                            .frame(width: 48, alignment: .trailing)
+//                    }
+//
+//                    Text("Sets Docky's larger icon size after the last system Dock sync, without writing back to the system Dock.")
+//                        .foregroundStyle(.secondary)
+//                        .fixedSize(horizontal: false, vertical: true)
+//                }
+//                .padding(.vertical, 4)
+//                .disabled(!dockSettings.magnification)
             }
 
             Section("Window Shape") {
@@ -344,12 +344,12 @@ struct AppearanceSettingsView: View {
         )
     }
 
-    private var systemDockLargeSizeBinding: Binding<Double> {
-        Binding(
-            get: { Double(dockSettings.largeSize) },
-            set: { dockSettings.setLargeSize(CGFloat(max($0, Double(dockSettings.tileSize)))) }
-        )
-    }
+//    private var systemDockLargeSizeBinding: Binding<Double> {
+//        Binding(
+//            get: { Double(dockSettings.largeSize) },
+//            set: { dockSettings.setLargeSize(CGFloat($0)) }
+//        )
+//    }
 
     private var windowCornerRadiusBinding: Binding<CGFloat> {
         Binding(
