@@ -75,6 +75,7 @@ final class LaunchpadOverlayWindowController: NSWindowController {
             guard let self, let window = self.window else { return }
 
             window.ignoresMouseEvents = true
+            window.orderOut(nil)
             self.mainWindow?.makeKey()
         }
         endMainWindowInteraction()
@@ -86,7 +87,6 @@ final class LaunchpadOverlayWindowController: NSWindowController {
         updateFrame()
         window.collectionBehavior = preferences.windowSpaceBehavior.collectionBehavior(includesFullScreenAuxiliary: true)
         configureHiddenWindowState()
-        window.orderFront(nil)
     }
 
     private func observeSpaceBehavior() {
@@ -103,6 +103,7 @@ final class LaunchpadOverlayWindowController: NSWindowController {
 
         window.alphaValue = 0
         window.ignoresMouseEvents = true
+        window.orderOut(nil)
     }
 
     private func animateWindowAlpha(to alphaValue: CGFloat, completion: (() -> Void)? = nil) {
@@ -126,7 +127,7 @@ final class LaunchpadOverlayWindowController: NSWindowController {
         guard let window else { return }
         let screenFrame = mainWindow?.screen?.frame ?? NSScreen.main?.frame ?? .zero
         guard !screenFrame.isEmpty else { return }
-        window.setFrame(screenFrame, display: true)
+        window.setFrame(screenFrame, display: window.isVisible)
     }
 
     private func beginMainWindowInteraction() {

@@ -231,6 +231,7 @@ final class CalendarService: ObservableObject {
 }
 
 struct CalendarEventSnapshot: Equatable {
+    let eventIdentifier: String
     let title: String
     let startDate: Date
     let endDate: Date
@@ -241,6 +242,7 @@ struct CalendarEventSnapshot: Equatable {
     let quickJoinURL: URL?
 
     nonisolated init(event: EKEvent) {
+        eventIdentifier = event.eventIdentifier ?? event.calendarItemIdentifier
         let trimmedTitle = event.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         title = trimmedTitle.isEmpty ? "Untitled Event" : trimmedTitle
         startDate = event.startDate
@@ -254,6 +256,7 @@ struct CalendarEventSnapshot: Equatable {
 
     #if DEBUG
     init(
+        eventIdentifier: String = UUID().uuidString,
         title: String,
         startDate: Date,
         endDate: Date,
@@ -263,6 +266,7 @@ struct CalendarEventSnapshot: Equatable {
         color: NSColor,
         quickJoinURL: URL?
     ) {
+        self.eventIdentifier = eventIdentifier
         self.title = title
         self.startDate = startDate
         self.endDate = endDate

@@ -104,7 +104,6 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
         updateFrame()
         window.collectionBehavior = preferences.windowSpaceBehavior.collectionBehavior(includesFullScreenAuxiliary: true)
         configureHiddenWindowState()
-        window.orderFront(nil)
     }
 
     private func observeSpaceBehavior() {
@@ -153,7 +152,7 @@ final class WindowSwitcherOverlayWindowController: NSWindowController {
         guard let window else { return }
         let screenFrame = mainWindow?.screen?.frame ?? NSScreen.main?.frame ?? .zero
         guard !screenFrame.isEmpty else { return }
-        window.setFrame(screenFrame, display: true)
+        window.setFrame(screenFrame, display: window.isVisible)
     }
 
     private func animateWindowAlpha(to alphaValue: CGFloat, completion: (() -> Void)? = nil) {

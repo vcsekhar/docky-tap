@@ -52,6 +52,9 @@ struct TileView: View {
     }
 
     private func contextActions(modifierFlags: NSEvent.ModifierFlags) -> [ContextAction] {
+        if isGrown {
+            return []
+        }
         if lockedProductFeature != nil {
             return lockedContextActions()
         }
@@ -450,6 +453,12 @@ struct TileView: View {
             }
             .onChange(of: isAppFolderListMenuPresented) { _, _ in
                 updateTooltipPresentation()
+            }
+            .onChange(of: editMode.isActive) { _, isActive in
+                guard isActive, isHoverGrowEligible else { return }
+                hoverEnterTask?.cancel()
+                hoverEnterTask = nil
+                applyGrownState(false)
             }
             .background {
                 ContextActionMenuPresenter(
@@ -890,6 +899,11 @@ struct TileView: View {
 
     private func scheduleGrowEnter() {
         hoverEnterTask?.cancel()
+
+        guard !isContextMenuPresented, !editMode.isActive else {
+            return
+        }
+
         let delaySeconds = max(0, preferences.widgetHoverGrowDelay)
         if delaySeconds == 0 {
             applyGrownState(true)
@@ -898,6 +912,7 @@ struct TileView: View {
         hoverEnterTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(delaySeconds))
             guard !Task.isCancelled else { return }
+            guard !isContextMenuPresented, !editMode.isActive else { return }
             applyGrownState(true)
         }
     }
@@ -952,6 +967,12 @@ struct TileView: View {
     private func updateContextMenuPresentation(isPresented: Bool) {
         isContextMenuPresented = isPresented
         updateTooltipPresentation()
+
+        if isPresented, isHoverGrowEligible {
+            hoverEnterTask?.cancel()
+            hoverEnterTask = nil
+            applyGrownState(false)
+        }
     }
 
     private func updateTooltipPresentation() {

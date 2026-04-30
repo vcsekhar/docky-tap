@@ -23,6 +23,7 @@ struct CalendarWidgetTileView: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             GeometryReader { proxy in
                 let layout = layout(in: proxy.size)
+                let expandedLayout = expandedLayout(in: proxy.size)
 
                 ZStack {
                     Color(nsColor: backgroundTintColor)
@@ -34,15 +35,22 @@ struct CalendarWidgetTileView: View {
                     }
 
                     content(layout: layout, now: context.date)
+                        .opacity(isExpanded ? 0 : 1)
+                        .animation(.easeOut(duration: 0.12), value: isExpanded)
+
+                    if isExpanded {
+                        expandedContent(layout: expandedLayout, now: context.date)
+                            .transition(
+                                .opacity.animation(
+                                    .easeInOut(duration: 0.22).delay(0.22)
+                                ).combined(with: .scale).combined(with: .slide)
+                            )
+                    }
                 }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task {
-            guard !showsDateVariant else {
-                return
-            }
-
             calendar.ensureFreshEvent()
         }
     }
@@ -166,6 +174,155 @@ struct CalendarWidgetTileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
+    private func expandedContent(layout: ExpandedLayoutMetrics, now: Date) -> some View {
+        if calendar.upcomingEvents.isEmpty {
+            expandedEmpty(layout: layout, now: now)
+        } else {
+            expandedAgenda(layout: layout, now: now)
+        }
+    }
+
+    private func expandedAgenda(layout: ExpandedLayoutMetrics, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: layout.sectionSpacing) {
+            expandedHeader(layout: layout, now: now)
+            expandedEventList(layout: layout, now: now)
+        }
+        .padding(layout.contentPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func expandedHeader(layout: ExpandedLayoutMetrics, now: Date) -> some View {
+        Text(headerDateText(for: now))
+            .font(.system(size: layout.headerFontSize, weight: .semibold))
+            .foregroundStyle(Color.red)
+            .lineLimit(1)
+            .tracking(0.4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func expandedEventList(layout: ExpandedLayoutMetrics, now: Date) -> some View {
+        let sections = expandedSections(now: now)
+
+        return ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: layout.sectionGroupSpacing) {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: layout.eventRowSpacing) {
+                        Text(section.title)
+                            .font(.system(size: layout.sectionTitleFontSize, weight: .semibold))
+                            .foregroundStyle(Color.primary.opacity(0.55))
+                            .tracking(0.5)
+                            .textCase(.uppercase)
+
+                        ForEach(Array(section.events.enumerated()), id: \.offset) { _, event in
+                            ExpandedEventRow(
+                                event: event,
+                                scheduleText: expandedScheduleText(for: event, now: now),
+                                layout: layout
+                            )
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func expandedSections(now: Date) -> [ExpandedAgendaSection] {
+        let calendarRef = Calendar.autoupdatingCurrent
+
+        var orderedDayKeys: [Date] = []
+        var grouped: [Date: [CalendarEventSnapshot]] = [:]
+
+        for event in calendar.upcomingEvents {
+            let dayKey = calendarRef.startOfDay(for: event.startDate)
+            if grouped[dayKey] == nil {
+                orderedDayKeys.append(dayKey)
+            }
+            grouped[dayKey, default: []].append(event)
+        }
+
+        return orderedDayKeys.map { dayKey in
+            ExpandedAgendaSection(
+                id: dayKey,
+                title: sectionTitle(for: dayKey, now: now),
+                events: grouped[dayKey] ?? []
+            )
+        }
+    }
+
+    private func sectionTitle(for day: Date, now: Date) -> String {
+        let calendarRef = Calendar.autoupdatingCurrent
+        if calendarRef.isDate(day, inSameDayAs: now) {
+            return "Today"
+        }
+        if calendarRef.isDateInTomorrow(day) {
+            return "Tomorrow"
+        }
+        return sectionDayFormatter.string(from: day)
+    }
+
+    private func headerDateText(for date: Date) -> String {
+        headerDateFormatter.string(from: date)
+    }
+
+    private func expandedEmpty(layout: ExpandedLayoutMetrics, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: layout.sectionSpacing) {
+            expandedHeader(layout: layout, now: now)
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: layout.stackSpacing) {
+                Image(systemName: calendar.lastErrorDescription == nil ? "calendar.badge.clock" : "calendar.badge.exclamationmark")
+                    .font(.system(size: layout.emptyIconSize, weight: .semibold))
+                    .foregroundStyle(Color.primary.opacity(0.84))
+
+                Text(emptyTitle)
+                    .font(.system(size: layout.eventTitleFontSize, weight: .semibold))
+                    .foregroundStyle(Color.primary.opacity(0.94))
+                    .multilineTextAlignment(.center)
+
+                if let detail = emptyDetail {
+                    Text(detail)
+                        .font(.system(size: layout.eventDetailFontSize))
+                        .foregroundStyle(Color.primary.opacity(0.62))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 0)
+        }
+        .padding(layout.contentPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func expandedScheduleText(for event: CalendarEventSnapshot, now: Date) -> String {
+        if event.isAllDay {
+            return "All day"
+        }
+
+        let start = timeFormatter.string(from: event.startDate)
+        let end = timeFormatter.string(from: event.endDate)
+        return "\(start) – \(end)"
+    }
+
+    private var headerDateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEEE d MMM")
+        return formatter
+    }
+
+    private var sectionDayFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        return formatter
+    }
+
     private func emptyState(layout: LayoutMetrics) -> some View {
         VStack(alignment: .center, spacing: layout.stackSpacing) {
             if calendar.isLoading {
@@ -246,6 +403,35 @@ struct CalendarWidgetTileView: View {
         }
 
         return url.absoluteString
+    }
+
+    private func expandedLayout(in size: CGSize) -> ExpandedLayoutMetrics {
+        let width = max(size.width, 1)
+        let height = max(size.height, 1)
+        let minSide = min(width, height)
+        let contentPadding = min(max(minSide * 0.07, 12), 22)
+        let contentGap = min(max(minSide * 0.05, 10), 18)
+        let stackSpacing = min(max(minSide * 0.025, 4), 10)
+        let sectionSpacing = min(max(minSide * 0.04, 10), 18)
+
+        return ExpandedLayoutMetrics(
+            contentPadding: contentPadding,
+            contentGap: contentGap,
+            stackSpacing: stackSpacing,
+            sectionSpacing: sectionSpacing,
+            sectionGroupSpacing: min(max(minSide * 0.045, 10), 18),
+            sectionTitleFontSize: min(max(minSide * 0.04, 9), 12),
+            headerFontSize: min(max(minSide * 0.06, 13), 18),
+            eventRowSpacing: min(max(minSide * 0.018, 4), 8),
+            eventRowGap: min(max(minSide * 0.022, 6), 10),
+            eventRowVerticalPadding: min(max(minSide * 0.018, 5), 8),
+            eventRowHorizontalPadding: min(max(minSide * 0.025, 7), 12),
+            eventRowCornerRadius: min(max(minSide * 0.03, 8), 12),
+            eventTitleFontSize: min(max(minSide * 0.05, 11), 14),
+            eventDetailFontSize: min(max(minSide * 0.04, 9), 12),
+            accentWidth: min(max(minSide * 0.012, 3), 5),
+            emptyIconSize: min(max(minSide * 0.16, 22), 36)
+        )
     }
 
     private func layout(in size: CGSize) -> LayoutMetrics {
@@ -417,4 +603,111 @@ private struct LayoutMetrics {
     let prominentFontSize: CGFloat
     let detailFontSize: CGFloat
     let emptyIconSize: CGFloat
+}
+
+private struct ExpandedLayoutMetrics {
+    let contentPadding: CGFloat
+    let contentGap: CGFloat
+    let stackSpacing: CGFloat
+    let sectionSpacing: CGFloat
+    let sectionGroupSpacing: CGFloat
+    let sectionTitleFontSize: CGFloat
+    let headerFontSize: CGFloat
+    let eventRowSpacing: CGFloat
+    let eventRowGap: CGFloat
+    let eventRowVerticalPadding: CGFloat
+    let eventRowHorizontalPadding: CGFloat
+    let eventRowCornerRadius: CGFloat
+    let eventTitleFontSize: CGFloat
+    let eventDetailFontSize: CGFloat
+    let accentWidth: CGFloat
+    let emptyIconSize: CGFloat
+}
+
+private struct ExpandedAgendaSection: Identifiable {
+    let id: Date
+    let title: String
+    let events: [CalendarEventSnapshot]
+}
+
+private struct ExpandedEventRow: View {
+    let event: CalendarEventSnapshot
+    let scheduleText: String
+    let layout: ExpandedLayoutMetrics
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: openInCalendar) {
+            HStack(alignment: .top, spacing: layout.eventRowGap) {
+                RoundedRectangle(cornerRadius: layout.accentWidth / 2, style: .continuous)
+                    .fill(Color(nsColor: event.color).opacity(0.95))
+                    .frame(width: layout.accentWidth)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(event.title)
+                        .font(.system(size: layout.eventTitleFontSize, weight: .semibold))
+                        .foregroundStyle(Color.primary.opacity(0.96))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(scheduleText)
+                        .font(.system(size: layout.eventDetailFontSize, weight: .medium))
+                        .foregroundStyle(Color.primary.opacity(0.66))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, layout.eventRowVerticalPadding)
+            .padding(.horizontal, layout.eventRowHorizontalPadding)
+            .contentShape(RoundedRectangle(cornerRadius: layout.eventRowCornerRadius, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: layout.eventRowCornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(isHovered ? 0.14 : 0.06))
+            )
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .contextMenu {
+            Button("Open in Calendar") {
+                openInCalendar()
+            }
+
+            if let quickJoinURL = event.quickJoinURL {
+                Button("Join Meeting") {
+                    NSWorkspace.shared.open(quickJoinURL)
+                }
+                Button("Copy Meeting Link") {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(quickJoinURL.absoluteString, forType: .string)
+                }
+            }
+
+            Divider()
+
+            Button("Copy Title") {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(event.title, forType: .string)
+            }
+
+            if !event.location.isEmpty {
+                Button("Copy Location") {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(event.location, forType: .string)
+                }
+            }
+        }
+    }
+
+    private func openInCalendar() {
+        guard let url = URL(string: "ical://ekevent/\(event.eventIdentifier)?method=show&options=more") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
 }
