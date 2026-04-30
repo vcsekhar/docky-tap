@@ -160,6 +160,9 @@ extension DockEditPaletteItem {
 
 enum ProductRegistrationStatus: Equatable {
     case unregistered
+    case startingTrial
+    case trialActive(Date)
+    case trialExpired(Date)
     case stored
     case verifying
     case verified(ProductTier)
@@ -169,6 +172,12 @@ enum ProductRegistrationStatus: Equatable {
         switch self {
         case .unregistered:
             "Not Registered"
+        case .startingTrial:
+            "Starting Trial"
+        case .trialActive:
+            "Trial Active"
+        case .trialExpired:
+            "Trial Expired"
         case .stored:
             "Registration Saved"
         case .verifying:
@@ -184,6 +193,12 @@ enum ProductRegistrationStatus: Equatable {
         switch self {
         case .unregistered:
             "Register Docky Pro to unlock premium features."
+        case .startingTrial:
+            "Starting your Docky Pro trial."
+        case .trialActive(let expiresAt):
+            "Your Docky Pro trial is active until \(Self.formattedDate(expiresAt))."
+        case .trialExpired(let expiresAt):
+            "Your Docky Pro trial expired on \(Self.formattedDate(expiresAt))."
         case .stored:
             "Your license key is saved on this Mac."
         case .verifying:
@@ -191,6 +206,37 @@ enum ProductRegistrationStatus: Equatable {
         case .verified(let tier):
             "This Mac is unlocked for Docky \(tier.title)."
         case .verificationFailed(let message):
+            message
+        }
+    }
+
+    private static func formattedDate(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .omitted)
+    }
+}
+
+private struct TrialStartResponse: Decodable {
+    let status: String
+    let email: String
+    let startedAt: String
+    let expiresAt: String
+}
+
+private enum TrialStartError: LocalizedError {
+    case invalidEmail
+    case invalidResponse
+    case transport
+    case server(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEmail:
+            "Enter a valid email address to start your trial."
+        case .invalidResponse:
+            "Docky received an invalid trial response."
+        case .transport:
+            "Couldn't reach Docky's trial server."
+        case .server(let message):
             message
         }
     }
@@ -228,6 +274,7 @@ final class ProductService: ObservableObject {
     nonisolated static let maximumActivationCount = 3
     nonisolated static let maximumFreeFolderCount = 3
     private nonisolated static let gumroadVerifyURL = URL(string: "https://api.gumroad.com/v2/licenses/verify")!
+    private nonisolated static let trialStartURL = URL(string: "https://getdocky.com/api/trial")!
     static let shared = ProductService()
 
     @Published private(set) var currentTier: ProductTier {
@@ -239,12 +286,23 @@ final class ProductService: ObservableObject {
 
     @Published private(set) var registrationStatus: ProductRegistrationStatus = .unregistered
     @Published private(set) var hasStoredLicenseKey = false
+    @Published private(set) var trialEmail: String = ""
+    @Published private(set) var trialExpiresAt: Date?
 
     private let defaults: UserDefaults
     private var verificationTask: Task<Void, Never>?
+    private var trialTask: Task<Void, Never>?
 
     var isVerifyingRegistration: Bool {
         if case .verifying = registrationStatus {
+            return true
+        }
+
+        return false
+    }
+
+    var isStartingTrial: Bool {
+        if case .startingTrial = registrationStatus {
             return true
         }
 
@@ -255,6 +313,9 @@ final class ProductService: ObservableObject {
         static let currentTier = "docky.product.currentTier"
         static let keychainService = "gt.quintero.Docky.product"
         static let keychainAccount = "gumroad-license-key"
+        static let trialIdentityAccount = "trial-identity"
+        static let trialEmail = "docky.product.trialEmail"
+        static let trialExpiresAt = "docky.product.trialExpiresAt"
         static let legacyRegisteredEmail = "docky.product.registeredEmail"
     }
 
@@ -263,6 +324,8 @@ final class ProductService: ObservableObject {
         self.currentTier = defaults.string(forKey: Keys.currentTier)
             .flatMap(ProductTier.init(rawValue:)) ?? .free
         self.hasStoredLicenseKey = Self.readLicenseKey() != nil
+        self.trialEmail = defaults.string(forKey: Keys.trialEmail) ?? ""
+        self.trialExpiresAt = defaults.object(forKey: Keys.trialExpiresAt) as? Date
         defaults.removeObject(forKey: Keys.legacyRegisteredEmail)
         refreshRegistrationStatus()
 
@@ -315,11 +378,29 @@ final class ProductService: ObservableObject {
         }
     }
 
+    func startTrial(email: String) {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        guard Self.isValidEmail(trimmedEmail) else {
+            registrationStatus = .verificationFailed(TrialStartError.invalidEmail.localizedDescription)
+            return
+        }
+
+        trialTask?.cancel()
+        registrationStatus = .startingTrial
+
+        trialTask = Task { [weak self] in
+            await self?.startTrialRequest(email: trimmedEmail)
+        }
+    }
+
     func clearRegistration() {
         verificationTask?.cancel()
+        trialTask?.cancel()
         currentTier = .free
         Self.deleteLicenseKey()
         hasStoredLicenseKey = false
+        clearTrial()
         defaults.removeObject(forKey: Keys.legacyRegisteredEmail)
         refreshRegistrationStatus()
     }
@@ -339,7 +420,16 @@ final class ProductService: ObservableObject {
 
     private func refreshRegistrationStatus() {
         if currentTier == .pro {
-            registrationStatus = .verified(.pro)
+            if let trialExpiresAt, !hasStoredLicenseKey {
+                if trialExpiresAt > Date() {
+                    registrationStatus = .trialActive(trialExpiresAt)
+                } else {
+                    currentTier = .free
+                    registrationStatus = .trialExpired(trialExpiresAt)
+                }
+            } else {
+                registrationStatus = .verified(.pro)
+            }
             return
         }
 
@@ -348,7 +438,38 @@ final class ProductService: ObservableObject {
             return
         }
 
+        if let trialExpiresAt {
+            if trialExpiresAt > Date() {
+                currentTier = .pro
+                registrationStatus = .trialActive(trialExpiresAt)
+            } else {
+                registrationStatus = .trialExpired(trialExpiresAt)
+            }
+            return
+        }
+
         registrationStatus = .unregistered
+    }
+
+    private func startTrialRequest(email: String) async {
+        do {
+            let identity = Self.readTrialIdentity() ?? Self.createTrialIdentity()
+            let response = try await Self.startTrial(email: email, identity: identity)
+            guard let expiresAt = Self.parseISO8601Date(response.expiresAt) else {
+                throw TrialStartError.invalidResponse
+            }
+
+            trialEmail = response.email
+            trialExpiresAt = expiresAt
+            defaults.set(response.email, forKey: Keys.trialEmail)
+            defaults.set(expiresAt, forKey: Keys.trialExpiresAt)
+            currentTier = expiresAt > Date() ? .pro : .free
+            refreshRegistrationStatus()
+        } catch let error as TrialStartError {
+            registrationStatus = .verificationFailed(error.localizedDescription)
+        } catch {
+            registrationStatus = .verificationFailed("Couldn't start your trial right now.")
+        }
     }
 
     private func verifyManualRegistration(
@@ -497,6 +618,47 @@ final class ProductService: ObservableObject {
         throw LicenseVerificationError.transport(message ?? "Couldn't verify the license right now.")
     }
 
+    private nonisolated static func startTrial(
+        email: String,
+        identity: String
+    ) async throws -> TrialStartResponse {
+        var request = URLRequest(url: trialStartURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "email": email,
+            "identity": identity
+        ])
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw TrialStartError.transport
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw TrialStartError.invalidResponse
+        }
+
+        if httpResponse.statusCode == 200 {
+            return try JSONDecoder().decode(TrialStartResponse.self, from: data)
+        }
+
+        let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let message = (payload?["error"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        throw TrialStartError.server(message ?? "Couldn't start your trial right now.")
+    }
+
+    private nonisolated static func isValidEmail(_ email: String) -> Bool {
+        email.range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) != nil
+    }
+
+    private nonisolated static func parseISO8601Date(_ value: String) -> Date? {
+        ISO8601DateFormatter().date(from: value)
+    }
+
     private nonisolated static func parsePurchase(from payload: [String: Any]) -> GumroadPurchase? {
         guard let productID = payload["product_id"] as? String else {
             return nil
@@ -521,11 +683,41 @@ final class ProductService: ObservableObject {
 
     @discardableResult
     private static func writeLicenseKey(_ licenseKey: String) -> Bool {
-        guard let data = licenseKey.data(using: .utf8) else {
+        writeKeychainString(licenseKey, account: Keys.keychainAccount)
+    }
+
+    private static func readLicenseKey() -> String? {
+        readKeychainString(account: Keys.keychainAccount)
+    }
+
+    private static func deleteLicenseKey() {
+        SecItemDelete(keychainQuery(account: Keys.keychainAccount) as CFDictionary)
+    }
+
+    private func clearTrial() {
+        trialEmail = ""
+        trialExpiresAt = nil
+        defaults.removeObject(forKey: Keys.trialEmail)
+        defaults.removeObject(forKey: Keys.trialExpiresAt)
+    }
+
+    private static func readTrialIdentity() -> String? {
+        readKeychainString(account: Keys.trialIdentityAccount)
+    }
+
+    private static func createTrialIdentity() -> String {
+        let identity = UUID().uuidString
+        _ = writeKeychainString(identity, account: Keys.trialIdentityAccount)
+        return identity
+    }
+
+    @discardableResult
+    private static func writeKeychainString(_ value: String, account: String) -> Bool {
+        guard let data = value.data(using: .utf8) else {
             return false
         }
 
-        let query = keychainQuery()
+        let query = keychainQuery(account: account)
         SecItemDelete(query as CFDictionary)
 
         var item = query
@@ -533,8 +725,8 @@ final class ProductService: ObservableObject {
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
 
-    private static func readLicenseKey() -> String? {
-        var query = keychainQuery()
+    private static func readKeychainString(account: String) -> String? {
+        var query = keychainQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -549,15 +741,11 @@ final class ProductService: ObservableObject {
         return value
     }
 
-    private static func deleteLicenseKey() {
-        SecItemDelete(keychainQuery() as CFDictionary)
-    }
-
-    private static func keychainQuery() -> [String: Any] {
+    private static func keychainQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Keys.keychainService,
-            kSecAttrAccount as String: Keys.keychainAccount
+            kSecAttrAccount as String: account
         ]
     }
 }

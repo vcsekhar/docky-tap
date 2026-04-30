@@ -8,6 +8,8 @@ import SwiftUI
 struct ProductSettingsView: View {
     @ObservedObject private var product = ProductService.shared
     @State private var licenseKey: String = ""
+    @State private var trialEmail: String = ""
+    @State private var isShowingTrialSheet = false
 
     var body: some View {
         Form {
@@ -56,6 +58,12 @@ struct ProductSettingsView: View {
                     }
 
                     HStack(spacing: 10) {
+                        Button("Start Trial") {
+                            trialEmail = product.trialEmail
+                            isShowingTrialSheet = true
+                        }
+                        .disabled(product.currentTier == .pro || product.isVerifyingRegistration || product.isStartingTrial)
+
                         Button("Verify License") {
                             product.registerProduct(licenseKey: licenseKey)
                             licenseKey = ""
@@ -93,9 +101,68 @@ struct ProductSettingsView: View {
         .formStyle(.grouped)
         .padding(.horizontal, 20)
         .onAppear(perform: syncFieldsFromService)
+        .onChange(of: product.trialExpiresAt) { _, expiresAt in
+            guard expiresAt != nil, product.currentTier == .pro else {
+                return
+            }
+
+            isShowingTrialSheet = false
+        }
+        .sheet(isPresented: $isShowingTrialSheet) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Start Your Trial")
+                    .font(.title2.weight(.semibold))
+
+                Text("Enter your email address to start a Docky Pro trial. Trial eligibility is checked online and can only be used once per email.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                TextField("Email Address", text: $trialEmail)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.emailAddress)
+                    .disabled(product.isStartingTrial)
+
+                if product.isStartingTrial {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Starting Trial...")
+                            .font(.body)
+                    }
+                }
+
+                Text(product.registrationStatus.message)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Spacer()
+
+                    Button("Cancel") {
+                        isShowingTrialSheet = false
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(product.isStartingTrial)
+
+                    Button("Start Trial") {
+                        product.startTrial(email: trialEmail)
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(
+                        trialEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        product.currentTier == .pro ||
+                        product.isStartingTrial ||
+                        product.isVerifyingRegistration
+                    )
+                }
+            }
+            .padding(20)
+            .frame(width: 420)
+        }
     }
 
     private func syncFieldsFromService() {
         licenseKey = ""
+        trialEmail = product.trialEmail
     }
 }
