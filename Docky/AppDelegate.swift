@@ -31,6 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         window?.orderOut(nil)
         NSApplication.shared.setActivationPolicy(.accessory)
         configureMainMenu()
+        SystemDockVisibilityService.shared.recoverStaleSnapshotIfNeeded()
 
         if ApplicationInstallService.shared.promptToMoveToApplicationsIfNeeded() {
             return
