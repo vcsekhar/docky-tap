@@ -7,6 +7,8 @@
 //  granted.
 //
 
+import Combine
+import Dispatch
 import Foundation
 
 enum FolderContentsSnapshot: Equatable {
@@ -14,13 +16,22 @@ enum FolderContentsSnapshot: Equatable {
     case unreadable
 }
 
-final class FolderAccessService {
+final class FolderAccessService: ObservableObject {
     static let shared = FolderAccessService()
+
+    @Published private(set) var changeToken: UInt64 = 0
 
     private let staleAfter: TimeInterval = 15
     private var contentsCache: [URL: (date: Date, items: [URL])] = [:]
+    private var watchersByURL: [URL: FolderWatcher] = [:]
 
     private init() {}
+
+    deinit {
+        for watcher in watchersByURL.values {
+            watcher.source.cancel()
+        }
+    }
 
     /// All visible contents of the folder, newest-modified first.
     /// Cached briefly to avoid hitting the filesystem on every view update.
@@ -84,26 +95,76 @@ final class FolderAccessService {
         Array(sortedContents(of: folderURL, sortMode: sortMode).prefix(limit))
     }
 
+    func beginWatching(_ folderURL: URL, ownerID: String) {
+        let normalizedFolderURL = folderURL.standardizedFileURL
+        if var watcher = watchersByURL[normalizedFolderURL] {
+            watcher.ownerIDs.insert(ownerID)
+            watchersByURL[normalizedFolderURL] = watcher
+            return
+        }
+
+        let descriptor = open(normalizedFolderURL.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            return
+        }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete, .attrib, .extend, .link, .revoke],
+            queue: DispatchQueue.main
+        )
+        source.setEventHandler { [weak self] in
+            self?.handleWatcherEvent(for: normalizedFolderURL)
+        }
+        source.setCancelHandler { [descriptor] in
+            close(descriptor)
+        }
+
+        watchersByURL[normalizedFolderURL] = FolderWatcher(
+            ownerIDs: [ownerID],
+            source: source
+        )
+        source.resume()
+    }
+
+    func endWatching(_ folderURL: URL, ownerID: String) {
+        let normalizedFolderURL = folderURL.standardizedFileURL
+        guard var watcher = watchersByURL[normalizedFolderURL] else {
+            return
+        }
+
+        watcher.ownerIDs.remove(ownerID)
+        guard watcher.ownerIDs.isEmpty else {
+            watchersByURL[normalizedFolderURL] = watcher
+            return
+        }
+
+        watchersByURL.removeValue(forKey: normalizedFolderURL)
+        watcher.source.cancel()
+    }
+
     private func cachedSnapshot(of folderURL: URL) -> FolderContentsSnapshot {
-        if let cached = contentsCache[folderURL],
+        let normalizedFolderURL = folderURL.standardizedFileURL
+
+        if let cached = contentsCache[normalizedFolderURL],
            Date().timeIntervalSince(cached.date) < staleAfter {
             return .loaded(cached.items)
         }
 
-        guard FileManager.default.isReadableFile(atPath: folderURL.path) else {
+        guard FileManager.default.isReadableFile(atPath: normalizedFolderURL.path) else {
             return .unreadable
         }
 
         let keys: [URLResourceKey] = [.contentModificationDateKey]
         guard let loaded = try? FileManager.default.contentsOfDirectory(
-            at: folderURL,
+            at: normalizedFolderURL,
             includingPropertiesForKeys: keys,
             options: [.skipsHiddenFiles]
         ).sorted(by: { Self.modDate($0) > Self.modDate($1) }) else {
             return .unreadable
         }
 
-        contentsCache[folderURL] = (Date(), loaded)
+        contentsCache[normalizedFolderURL] = (Date(), loaded)
         return .loaded(loaded)
     }
 
@@ -111,9 +172,23 @@ final class FolderAccessService {
         contentsCache.removeAll()
     }
 
+    private func invalidateCache(for folderURL: URL) {
+        contentsCache.removeValue(forKey: folderURL.standardizedFileURL)
+    }
+
+    private func handleWatcherEvent(for folderURL: URL) {
+        invalidateCache(for: folderURL)
+        changeToken &+= 1
+    }
+
     private static func modDate(_ url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
+}
+
+private struct FolderWatcher {
+    var ownerIDs: Set<String>
+    let source: DispatchSourceFileSystemObject
 }
 
 private struct FolderSortEntry {
@@ -122,7 +197,7 @@ private struct FolderSortEntry {
     let modificationDate: Date
     let isDirectory: Bool
 
-    init(url: URL) {
+    nonisolated init(url: URL) {
         let values = try? url.resourceValues(forKeys: [.localizedNameKey, .contentModificationDateKey, .isDirectoryKey])
         self.url = url
         self.displayName = values?.localizedName ?? url.lastPathComponent

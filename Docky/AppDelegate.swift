@@ -32,6 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         _ = AppUpdateService.shared
         _ = ProductService.shared
+        AnalyticsService.shared.configureIfNeeded()
         _ = LaunchpadHotKeyService.shared
 
         DockyPreferences.shared.applySystemDockVisibilityPreference()

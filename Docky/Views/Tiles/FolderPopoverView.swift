@@ -15,10 +15,12 @@ struct FolderPopoverView: View {
     let onPopoverSizeChange: (CGSize) -> Void
 
     @ObservedObject private var permissions = PermissionsService.shared
+    @ObservedObject private var folderAccess = FolderAccessService.shared
     @State private var currentEntry: FolderPopoverEntry
     @State private var backHistory: [FolderPopoverEntry]
     @State private var selectedItemID: String?
     @State private var isDropTargeted = false
+    @State private var watchedEntryURL: URL?
 
     private let maxGridColumnCount = 6
     private let gridItemWidth: CGFloat = 144
@@ -58,6 +60,7 @@ struct FolderPopoverView: View {
                 onDrop: handleDroppedItems
             ))
             .task(id: reloadKey) {
+                syncWatchedFolder()
                 currentEntry = refreshedEntry(for: currentEntry)
                 backHistory = backHistory.map(refreshedEntry(for:))
                 selectDefaultItemIfNeeded()
@@ -70,8 +73,12 @@ struct FolderPopoverView: View {
                 }
             }
             .onAppear {
+                syncWatchedFolder()
                 selectDefaultItemIfNeeded()
                 reportPopoverSize()
+            }
+            .onDisappear {
+                stopWatchingCurrentFolder()
             }
             .onChange(of: popoverSize) { _, _ in
                 reportPopoverSize()
@@ -299,7 +306,11 @@ struct FolderPopoverView: View {
     }
 
     private var reloadKey: String {
-        "\(tile.url.path)|\(permissions.userFolders)|\(isPresented)"
+        "\(currentEntry.url.path)|\(permissions.userFolders)|\(folderAccess.changeToken)|\(isPresented)"
+    }
+
+    private var watcherOwnerID: String {
+        "folder-popover:\(tile.url.standardizedFileURL.path)"
     }
 
     private func handleSelection(of itemURL: URL) {
@@ -407,6 +418,25 @@ struct FolderPopoverView: View {
             displayName: entry.displayName,
             snapshot: FolderAccessService.shared.snapshot(of: entry.url)
         )
+    }
+
+    private func syncWatchedFolder() {
+        let normalizedCurrentURL = currentEntry.url.standardizedFileURL
+        if let watchedEntryURL, watchedEntryURL != normalizedCurrentURL {
+            folderAccess.endWatching(watchedEntryURL, ownerID: watcherOwnerID)
+        }
+
+        watchedEntryURL = normalizedCurrentURL
+        folderAccess.beginWatching(normalizedCurrentURL, ownerID: watcherOwnerID)
+    }
+
+    private func stopWatchingCurrentFolder() {
+        guard let watchedEntryURL else {
+            return
+        }
+
+        folderAccess.endWatching(watchedEntryURL, ownerID: watcherOwnerID)
+        self.watchedEntryURL = nil
     }
 
     private func reportPopoverSize() {

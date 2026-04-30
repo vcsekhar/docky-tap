@@ -10,6 +10,7 @@ struct FolderTileView: View {
     let tile: FolderTile
     let isOpen: Bool
     @ObservedObject private var permissions = PermissionsService.shared
+    @ObservedObject private var folderAccess = FolderAccessService.shared
     @State private var preview: [URL] = []
 
     var body: some View {
@@ -17,6 +18,12 @@ struct FolderTileView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .task(id: reloadKey) {
                 preview = FolderAccessService.shared.recentContents(of: tile.url, sortMode: tile.sortMode, limit: 3)
+            }
+            .onAppear {
+                folderAccess.beginWatching(tile.url, ownerID: watcherOwnerID)
+            }
+            .onDisappear {
+                folderAccess.endWatching(tile.url, ownerID: watcherOwnerID)
             }
     }
 
@@ -102,7 +109,11 @@ struct FolderTileView: View {
     }
 
     private var reloadKey: String {
-        "\(tile.url.path)|\(permissions.userFolders)|\(tile.displayMode.rawValue)|\(tile.sortMode.rawValue)"
+        "\(tile.url.path)|\(permissions.userFolders)|\(tile.displayMode.rawValue)|\(tile.sortMode.rawValue)|\(folderAccess.changeToken)"
+    }
+
+    private var watcherOwnerID: String {
+        "folder-tile:\(tile.url.standardizedFileURL.path)"
     }
 }
 

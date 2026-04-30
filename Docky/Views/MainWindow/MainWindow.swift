@@ -90,6 +90,8 @@ final class MainWindow: NSWindow {
     private var hideWorkItem: DispatchWorkItem?
     private var globalPointerMonitor: Any?
     private var localPointerMonitor: Any?
+    private var globalDragRevealMonitor: Any?
+    private var localDragRevealMonitor: Any?
     private var isPointerInsideWindow = false
     private var activeInteractionCount = 0
     private var visibilityState: VisibilityState
@@ -122,6 +124,7 @@ final class MainWindow: NSWindow {
         observeWindowPlacementInputs()
         observeVisibilityInputs()
         updatePointerScreenMonitoring()
+        updateDragRevealMonitoring()
     }
 
     deinit {
@@ -130,6 +133,12 @@ final class MainWindow: NSWindow {
         }
         if let localPointerMonitor {
             NSEvent.removeMonitor(localPointerMonitor)
+        }
+        if let globalDragRevealMonitor {
+            NSEvent.removeMonitor(globalDragRevealMonitor)
+        }
+        if let localDragRevealMonitor {
+            NSEvent.removeMonitor(localDragRevealMonitor)
         }
     }
 
@@ -261,6 +270,26 @@ final class MainWindow: NSWindow {
         }
     }
 
+    private func updateDragRevealMonitoring() {
+        if let globalDragRevealMonitor {
+            NSEvent.removeMonitor(globalDragRevealMonitor)
+            self.globalDragRevealMonitor = nil
+        }
+        if let localDragRevealMonitor {
+            NSEvent.removeMonitor(localDragRevealMonitor)
+            self.localDragRevealMonitor = nil
+        }
+
+        let dragEvents: NSEvent.EventTypeMask = [.leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        globalDragRevealMonitor = NSEvent.addGlobalMonitorForEvents(matching: dragEvents) { [weak self] _ in
+            self?.syncPointerPresenceForDragSession()
+        }
+        localDragRevealMonitor = NSEvent.addLocalMonitorForEvents(matching: dragEvents) { [weak self] event in
+            self?.syncPointerPresenceForDragSession()
+            return event
+        }
+    }
+
     private func handlePointerScreenChangeIfNeeded() {
         guard preferences.windowDisplayTarget == .displayContainingPointer else { return }
         let nextScreenFrame = targetScreen()?.frame
@@ -282,6 +311,15 @@ final class MainWindow: NSWindow {
     func pointerDidExitWindow() {
         isPointerInsideWindow = false
         scheduleHideIfNeeded()
+    }
+
+    private func syncPointerPresenceForDragSession() {
+        let containsPointer = frame.contains(NSEvent.mouseLocation)
+        if containsPointer, !isPointerInsideWindow {
+            pointerDidEnterWindow()
+        } else if !containsPointer, isPointerInsideWindow {
+            pointerDidExitWindow()
+        }
     }
 
     func beginInteraction() {
