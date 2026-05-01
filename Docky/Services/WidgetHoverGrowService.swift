@@ -9,22 +9,31 @@ import Foundation
 final class WidgetHoverGrowService: ObservableObject {
     static let shared = WidgetHoverGrowService()
 
-    @Published private(set) var isActive = false
+    @Published private(set) var activeExtent: WidgetExpansionExtent?
 
-    private var hoveredIdentifiers: Set<String> = []
+    var isActive: Bool { activeExtent != nil }
+
+    private var hoveredExtents: [String: WidgetExpansionExtent] = [:]
 
     private init() {}
 
-    func setHovered(_ hovered: Bool, identifier: String) {
+    func setHovered(_ hovered: Bool, identifier: String, extent: WidgetExpansionExtent = .standard) {
         if hovered {
-            hoveredIdentifiers.insert(identifier)
+            hoveredExtents[identifier] = extent
         } else {
-            hoveredIdentifiers.remove(identifier)
+            hoveredExtents.removeValue(forKey: identifier)
         }
 
-        let nowActive = !hoveredIdentifiers.isEmpty
-        if nowActive != isActive {
-            isActive = nowActive
+        let next = aggregatedExtent()
+        if next != activeExtent {
+            activeExtent = next
         }
+    }
+
+    private func aggregatedExtent() -> WidgetExpansionExtent? {
+        guard !hoveredExtents.isEmpty else { return nil }
+        let maxWidth = hoveredExtents.values.map(\.widthTiles).max() ?? WidgetExpansionExtent.standard.widthTiles
+        let maxHeight = hoveredExtents.values.map(\.heightTiles).max() ?? WidgetExpansionExtent.standard.heightTiles
+        return WidgetExpansionExtent(widthTiles: maxWidth, heightTiles: maxHeight)
     }
 }

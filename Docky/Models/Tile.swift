@@ -130,6 +130,22 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             TileSpan.allCases
         }
     }
+
+    nonisolated var expansionExtent: WidgetExpansionExtent {
+        switch self {
+        case .nowPlaying:
+            WidgetExpansionExtent(widthTiles: 4, heightTiles: 2)
+        case .calendar, .calendarDate, .reminders, .batteries, .systemStatus, .weather:
+            .standard
+        }
+    }
+}
+
+struct WidgetExpansionExtent: Equatable {
+    let widthTiles: Int
+    let heightTiles: Int
+
+    static let standard = WidgetExpansionExtent(widthTiles: 3, heightTiles: 3)
 }
 
 enum TileSpan: Int, CaseIterable, Codable, Identifiable {

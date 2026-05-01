@@ -386,10 +386,11 @@ struct TileView: View {
 
     private var hoverGrowingBody: some View {
         GeometryReader { geo in
+            let target = hoverGrowSize(in: geo.size)
             tileBody
                 .frame(
-                    width: isGrown ? hoverGrowExtent(in: geo.size) : geo.size.width,
-                    height: isGrown ? hoverGrowExtent(in: geo.size) : geo.size.height
+                    width: isGrown ? target.width : geo.size.width,
+                    height: isGrown ? target.height : geo.size.height
                 )
                 .frame(
                     width: geo.size.width,
@@ -925,7 +926,7 @@ struct TileView: View {
     private func applyGrownState(_ grown: Bool) {
         guard isGrown != grown else { return }
         isGrown = grown
-        WidgetHoverGrowService.shared.setHovered(grown, identifier: tile.id)
+        WidgetHoverGrowService.shared.setHovered(grown, identifier: tile.id, extent: expansionExtent)
     }
 
     private var isHoverGrowEligible: Bool {
@@ -950,9 +951,24 @@ struct TileView: View {
         }
     }
 
-    private func hoverGrowExtent(in size: CGSize) -> CGFloat {
+    private func hoverGrowSize(in size: CGSize) -> CGSize {
         let baseTileWidth = size.width / CGFloat(max(hoverGrowSpanCount, 1))
-        return baseTileWidth * 3
+        let extent = expansionExtent
+        return CGSize(
+            width: baseTileWidth * CGFloat(extent.widthTiles),
+            height: baseTileWidth * CGFloat(extent.heightTiles)
+        )
+    }
+
+    private var expansionExtent: WidgetExpansionExtent {
+        switch tile.content {
+        case .widget(let widget):
+            return widget.kind.expansionExtent
+        case .app(let app):
+            return app.displayedWidget?.kind.expansionExtent ?? .standard
+        default:
+            return .standard
+        }
     }
 
     private var hoverGrowAnchorAlignment: Alignment {
