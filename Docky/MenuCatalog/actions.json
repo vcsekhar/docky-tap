@@ -170,6 +170,66 @@
           "holdOption": false
         },
         {
+          "id": "xcode.run",
+          "title": "Run",
+          "kind": "menuClick",
+          "tileTypes": ["app"],
+          "targetApp": "com.apple.dt.Xcode",
+          "permissions": ["accessibility"],
+          "inputs": [],
+          "path": ["Product", "Run"],
+          "destructive": false,
+          "requiresFrontmost": true,
+          "holdOption": false,
+          "symbol": "play.fill",
+          "when": { "bundleIdentifierEquals": "com.apple.dt.Xcode" }
+        },
+        {
+          "id": "xcode.test",
+          "title": "Test",
+          "kind": "menuClick",
+          "tileTypes": ["app"],
+          "targetApp": "com.apple.dt.Xcode",
+          "permissions": ["accessibility"],
+          "inputs": [],
+          "path": ["Product", "Test"],
+          "destructive": false,
+          "requiresFrontmost": true,
+          "holdOption": false,
+          "symbol": "checkmark.diamond",
+          "when": { "bundleIdentifierEquals": "com.apple.dt.Xcode" }
+        },
+        {
+          "id": "xcode.profile",
+          "title": "Profile",
+          "kind": "menuClick",
+          "tileTypes": ["app"],
+          "targetApp": "com.apple.dt.Xcode",
+          "permissions": ["accessibility"],
+          "inputs": [],
+          "path": ["Product", "Profile"],
+          "destructive": false,
+          "requiresFrontmost": true,
+          "holdOption": false,
+          "symbol": "speedometer",
+          "when": { "bundleIdentifierEquals": "com.apple.dt.Xcode" }
+        },
+        {
+          "id": "xcode.analyze",
+          "title": "Analyze",
+          "kind": "menuClick",
+          "tileTypes": ["app"],
+          "targetApp": "com.apple.dt.Xcode",
+          "permissions": ["accessibility"],
+          "inputs": [],
+          "path": ["Product", "Analyze"],
+          "destructive": false,
+          "requiresFrontmost": true,
+          "holdOption": false,
+          "symbol": "stethoscope",
+          "when": { "bundleIdentifierEquals": "com.apple.dt.Xcode" }
+        },
+        {
           "id": "xcode.clean-build-folder",
           "title": "Clean Build Folder",
           "kind": "menuClick",
@@ -181,6 +241,7 @@
           "destructive": false,
           "requiresFrontmost": true,
           "holdOption": false,
+          "symbol": "trash",
           "when": { "bundleIdentifierEquals": "com.apple.dt.Xcode" }
         }
       ]

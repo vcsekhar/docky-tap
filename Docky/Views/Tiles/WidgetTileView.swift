@@ -11,6 +11,7 @@ struct WidgetTileView: View {
     let renderedSpan: TileSpan
     let isWithinStack: Bool
     var isExpanded: Bool = false
+    var isExpandedPreviewOpen: Bool = false
 
     var body: some View {
         #if DEBUG
@@ -24,7 +25,8 @@ struct WidgetTileView: View {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: isWithinStack,
-                isExpanded: isExpanded
+                isExpanded: isExpanded,
+                isExpandedPreviewOpen: isExpandedPreviewOpen
             )
         case .reminders:
             RemindersWidgetTileView(
@@ -32,7 +34,8 @@ struct WidgetTileView: View {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: isWithinStack,
-                isExpanded: isExpanded
+                isExpanded: isExpanded,
+                isExpandedPreviewOpen: isExpandedPreviewOpen
             )
         case .batteries:
             BatteriesWidgetTileView(
@@ -40,7 +43,8 @@ struct WidgetTileView: View {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: isWithinStack,
-                isExpanded: isExpanded
+                isExpanded: isExpanded,
+                isExpandedPreviewOpen: isExpandedPreviewOpen
             )
         case .systemStatus:
             SystemStatusWidgetTileView(
@@ -48,7 +52,8 @@ struct WidgetTileView: View {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: isWithinStack,
-                isExpanded: isExpanded
+                isExpanded: isExpanded,
+                isExpandedPreviewOpen: isExpandedPreviewOpen
             )
         case .nowPlaying:
             NowPlayingWidgetTileView(
@@ -56,7 +61,8 @@ struct WidgetTileView: View {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: isWithinStack,
-                isExpanded: isExpanded
+                isExpanded: isExpanded,
+                isExpandedPreviewOpen: isExpandedPreviewOpen
             )
         case .weather:
             WeatherWidgetTileView(
@@ -64,7 +70,8 @@ struct WidgetTileView: View {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: isWithinStack,
-                isExpanded: isExpanded
+                isExpanded: isExpanded,
+                isExpandedPreviewOpen: isExpandedPreviewOpen
             )
         }
     }

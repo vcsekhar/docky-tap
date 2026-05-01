@@ -12,6 +12,7 @@ struct CalendarWidgetTileView: View {
     let renderedSpan: TileSpan
     let isWithinStack: Bool
     var isExpanded: Bool = false
+    var isExpandedPreviewOpen: Bool = false
 
     @ObservedObject private var calendar = CalendarService.shared
 
@@ -39,8 +40,7 @@ struct CalendarWidgetTileView: View {
                     }
 
                     content(layout: layout, now: context.date)
-                        .opacity(isExpanded ? 0 : 1)
-                        .animation(.easeOut(duration: 0.12), value: isExpanded)
+                        .opacity(isExpandedPreviewOpen && isExpanded ? 0 : 1)
 
                     if isExpanded {
                         expandedContent(layout: expandedLayout, now: context.date)
@@ -51,8 +51,12 @@ struct CalendarWidgetTileView: View {
                             )
                     }
                 }
+                .animation(.easeInOut(duration: 0.22), value: isExpanded)
+                .animation(.easeOut(duration: 0.12), value: isExpandedPreviewOpen)
             }
         }
+        .opacity(isExpandedPreviewOpen && !isExpanded ? 0.5 : 1)
+        .animation(.easeOut(duration: 0.12), value: isExpandedPreviewOpen)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task {
             calendar.ensureFreshEvent()

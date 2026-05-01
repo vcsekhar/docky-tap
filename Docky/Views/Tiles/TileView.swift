@@ -21,6 +21,7 @@ struct TileView: View {
     @ObservedObject private var workspace = WorkspaceService.shared
     @ObservedObject private var mediaPlayback = MediaPlaybackService.shared
     @ObservedObject private var editMode = DockEditModeService.shared
+    @ObservedObject private var widgetExpansion = WidgetExpansionWindowController.shared
     @State private var isHovering = false
     @State private var isTooltipPresented = false
     @State private var tooltipDelayTask: Task<Void, Never>?
@@ -47,6 +48,7 @@ struct TileView: View {
         self._workspace = ObservedObject(wrappedValue: WorkspaceService.shared)
         self._mediaPlayback = ObservedObject(wrappedValue: MediaPlaybackService.shared)
         self._editMode = ObservedObject(wrappedValue: DockEditModeService.shared)
+        self._widgetExpansion = ObservedObject(wrappedValue: WidgetExpansionWindowController.shared)
     }
 
     private func contextActions(modifierFlags: NSEvent.ModifierFlags) -> [ContextAction] {
@@ -768,7 +770,8 @@ struct TileView: View {
                     cornerRadius: nonAppTileCornerRadius,
                     renderedSpan: renderedWidgetSpan(for: displayedWidget.effectiveSpan),
                     isWithinStack: false,
-                    isExpanded: false
+                    isExpanded: false,
+                    isExpandedPreviewOpen: widgetExpansion.activeSourceTileID == tile.id
                 )
             } else {
                 AppTileView(
@@ -800,7 +803,8 @@ struct TileView: View {
                 cornerRadius: nonAppTileCornerRadius,
                 renderedSpan: renderedWidgetSpan(for: widget.effectiveSpan),
                 isWithinStack: false,
-                isExpanded: false
+                isExpanded: false,
+                isExpandedPreviewOpen: widgetExpansion.activeSourceTileID == tile.id
             )
         case .smartStack(let stack):
             SmartStackTileView(
@@ -896,7 +900,13 @@ struct TileView: View {
         widgetExpansionTask?.cancel()
         widgetExpansionTask = nil
 
-        guard isHovering, let widget = expandableWidget, !isContextMenuPresented, !editMode.isActive else {
+        guard preferences.enablesWidgetHoverPreview,
+              preferences.widgetHoverPreviewSpans.contains(expandableWidgetRenderedSpan),
+              isHovering,
+              let widget = expandableWidget,
+              !isContextMenuPresented,
+              !editMode.isActive
+        else {
             WidgetExpansionWindowController.shared.requestDismiss(sourceTileID: tile.id)
             return
         }

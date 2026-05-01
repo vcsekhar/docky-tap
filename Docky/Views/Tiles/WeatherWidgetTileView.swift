@@ -13,6 +13,7 @@ struct WeatherWidgetTileView: View {
     let renderedSpan: TileSpan
     let isWithinStack: Bool
     var isExpanded: Bool = false
+    var isExpandedPreviewOpen: Bool = false
 
     @ObservedObject private var weather = WeatherService.shared
 
@@ -39,8 +40,9 @@ struct WeatherWidgetTileView: View {
                 }
 
                 content(layout: layout)
-                    .opacity(isExpanded ? 0 : 1)
+                    .opacity(isExpanded || isExpandedPreviewOpen ? 0 : 1)
                     .animation(.easeOut(duration: 0.12), value: isExpanded)
+                    .animation(.easeOut(duration: 0.12), value: isExpandedPreviewOpen)
 
                 if isExpanded {
                     expandedContent(layout: expandedLayout)
@@ -54,6 +56,7 @@ struct WeatherWidgetTileView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.22), value: isExpanded)
+            .animation(.easeOut(duration: 0.12), value: isExpandedPreviewOpen)
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task {

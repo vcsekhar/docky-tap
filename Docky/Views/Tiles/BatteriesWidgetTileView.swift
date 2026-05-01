@@ -12,6 +12,7 @@ struct BatteriesWidgetTileView: View {
     let renderedSpan: TileSpan
     let isWithinStack: Bool
     var isExpanded: Bool = false
+    var isExpandedPreviewOpen: Bool = false
 
     @ObservedObject private var batteries = BatteriesService.shared
 

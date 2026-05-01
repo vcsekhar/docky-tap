@@ -12,6 +12,10 @@
         { "type": "action", "action": "dia.new-window" },
         { "type": "action", "action": "dia.new-tab" },
         { "type": "action", "action": "claude.new-conversation" },
+        { "type": "action", "action": "xcode.run" },
+        { "type": "action", "action": "xcode.test" },
+        { "type": "action", "action": "xcode.profile" },
+        { "type": "action", "action": "xcode.analyze" },
         { "type": "action", "action": "xcode.clean-build-folder" },
         { "type": "divider" },
         {

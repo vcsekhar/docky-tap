@@ -12,6 +12,7 @@ struct RemindersWidgetTileView: View {
     let renderedSpan: TileSpan
     let isWithinStack: Bool
     var isExpanded: Bool = false
+    var isExpandedPreviewOpen: Bool = false
 
     @ObservedObject private var reminders = RemindersService.shared
 

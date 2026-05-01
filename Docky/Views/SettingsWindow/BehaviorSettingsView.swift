@@ -169,6 +169,31 @@ struct BehaviorSettingsView: View {
 
             Section("Widgets") {
                 VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Show Expanded Preview on Hover", isOn: $preferences.enablesWidgetHoverPreview)
+                        .font(.headline)
+
+                    Text("When enabled, hovering an expandable widget tile shows a larger preview in a separate window. Turn this off to keep widgets at their pinned size.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Apply To Sizes")
+                        .font(.headline)
+
+                    ForEach(TileSpan.allCases) { span in
+                        Toggle(spanTitle(for: span), isOn: spanBinding(for: span))
+                    }
+
+                    Text("Choose which tile sizes trigger the expanded preview. Widgets pinned at other sizes stay at their pinned size on hover.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+                .disabled(!preferences.enablesWidgetHoverPreview)
+
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Hover Preview Delay")
                         .font(.headline)
 
@@ -190,6 +215,7 @@ struct BehaviorSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 4)
+                .disabled(!preferences.enablesWidgetHoverPreview)
             }
 
             Section("Launch") {
@@ -246,6 +272,29 @@ struct BehaviorSettingsView: View {
         }
         .formStyle(.grouped)
         .padding(.horizontal, 20)
+    }
+
+    private func spanTitle(for span: TileSpan) -> String {
+        switch span {
+        case .one: "Small"
+        case .two: "Medium"
+        case .three: "Large"
+        }
+    }
+
+    private func spanBinding(for span: TileSpan) -> Binding<Bool> {
+        Binding(
+            get: { preferences.widgetHoverPreviewSpans.contains(span) },
+            set: { isOn in
+                var spans = preferences.widgetHoverPreviewSpans
+                if isOn {
+                    spans.insert(span)
+                } else {
+                    spans.remove(span)
+                }
+                preferences.widgetHoverPreviewSpans = spans
+            }
+        )
     }
 
 }

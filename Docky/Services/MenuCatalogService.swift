@@ -225,6 +225,7 @@ final class MenuCatalogService: ObservableObject {
 
                 resolved.append(ContextAction.action(
                     resolvedTitle(for: definition, context: context),
+                    image: symbolImage(for: definition.symbol),
                     isDestructive: definition.destructive || (definition.destructiveWhen?.evaluate(in: context) ?? false),
                     isOn: definition.toggleFlag.map { context.value(for: $0) } ?? false
                 ) {
@@ -240,6 +241,11 @@ final class MenuCatalogService: ObservableObject {
         }
 
         return resolved
+    }
+
+    private func symbolImage(for symbolName: String?) -> NSImage? {
+        guard let symbolName, !symbolName.isEmpty else { return nil }
+        return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
     }
 
     private func resolvedTitle(for action: CatalogActionDefinition, context: CatalogActionContext) -> String {

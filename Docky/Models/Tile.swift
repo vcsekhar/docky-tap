@@ -134,7 +134,7 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
     nonisolated var expansionExtent: WidgetExpansionExtent {
         switch self {
         case .nowPlaying:
-            WidgetExpansionExtent(widthTiles: 4, heightTiles: 2)
+            WidgetExpansionExtent(widthTiles: 5, heightTiles: 2)
         case .calendar, .calendarDate, .reminders, .batteries, .systemStatus, .weather:
             .standard
         }

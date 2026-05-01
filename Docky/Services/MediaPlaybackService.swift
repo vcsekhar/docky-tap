@@ -8,6 +8,24 @@ import Combine
 import Foundation
 import OSLog
 
+struct SyncedLyricsLine: Equatable {
+    let time: TimeInterval
+    let text: String
+}
+
+struct LyricsContent: Equatable {
+    let plain: String
+    let lines: [SyncedLyricsLine]
+
+    var hasSyncedLines: Bool { !lines.isEmpty }
+}
+
+enum LyricsLoadState: Equatable {
+    case loading
+    case loaded(LyricsContent)
+    case unavailable
+}
+
 struct MediaPlaybackState: Equatable {
     let bundleIdentifier: String
     let displayName: String
@@ -45,6 +63,7 @@ final class MediaPlaybackService: ObservableObject {
     static let genericNowPlayingOwnerBundleIdentifier = WidgetOwnerBundleIdentifiers.genericNowPlaying
 
     @Published private(set) var statesByBundleIdentifier: [String: MediaPlaybackState] = [:]
+    @Published private(set) var lyricsByTrackKey: [String: LyricsLoadState] = [:]
 
     private let mediaRemote = MediaRemoteBridge.shared
 
@@ -139,6 +158,195 @@ final class MediaPlaybackService: ObservableObject {
         mediaRemote.sendCommand(.previousTrack)
         try? await Task.sleep(for: .milliseconds(120))
         refresh()
+    }
+
+    func supportsLyrics(for bundleIdentifier: String) -> Bool {
+        guard let resolved = resolvedBundleIdentifier(for: bundleIdentifier),
+              let state = state(for: resolved),
+              !state.title.isEmpty,
+              !state.artist.isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    func currentTrackKey(for bundleIdentifier: String) -> String? {
+        guard let resolved = resolvedBundleIdentifier(for: bundleIdentifier),
+              let state = state(for: resolved),
+              state.hasContent else {
+            return nil
+        }
+
+        return "\(resolved)|\(state.title)|\(state.artist)|\(state.album)"
+    }
+
+    func lyricsState(for bundleIdentifier: String) -> LyricsLoadState? {
+        guard let key = currentTrackKey(for: bundleIdentifier) else { return nil }
+        return lyricsByTrackKey[key]
+    }
+
+    func requestLyrics(for bundleIdentifier: String) {
+        guard let resolved = resolvedBundleIdentifier(for: bundleIdentifier),
+              let state = state(for: resolved),
+              !state.title.isEmpty,
+              !state.artist.isEmpty,
+              let key = currentTrackKey(for: bundleIdentifier),
+              lyricsByTrackKey[key] == nil else {
+            return
+        }
+
+        lyricsByTrackKey[key] = .loading
+
+        let title = state.title
+        let artist = state.artist
+        let album = state.album
+        let duration = Int(state.duration.rounded())
+
+        Task { @MainActor in
+            let content = await Self.fetchLyricsFromLRClib(
+                title: title,
+                artist: artist,
+                album: album,
+                duration: duration
+            )
+            self.lyricsByTrackKey[key] = content.map { .loaded($0) } ?? .unavailable
+        }
+    }
+
+    private struct LRCEntry: Decodable {
+        let plainLyrics: String?
+        let syncedLyrics: String?
+        let instrumental: Bool?
+    }
+
+    nonisolated private static func fetchLyricsFromLRClib(
+        title: String,
+        artist: String,
+        album: String,
+        duration: Int
+    ) async -> LyricsContent? {
+        if let content = await fetchLRClibGet(title: title, artist: artist, album: album, duration: duration) {
+            return content
+        }
+        return await fetchLRClibSearch(title: title, artist: artist)
+    }
+
+    nonisolated private static func fetchLRClibGet(
+        title: String,
+        artist: String,
+        album: String,
+        duration: Int
+    ) async -> LyricsContent? {
+        var components = URLComponents(string: "https://lrclib.net/api/get")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+        if !album.isEmpty {
+            items.append(URLQueryItem(name: "album_name", value: album))
+        }
+        if duration > 0 {
+            items.append(URLQueryItem(name: "duration", value: String(duration)))
+        }
+        components?.queryItems = items
+
+        guard let entry: LRCEntry = await fetchDecodable(from: components?.url) else {
+            return nil
+        }
+        return resolvedLyrics(from: entry)
+    }
+
+    nonisolated private static func fetchLRClibSearch(
+        title: String,
+        artist: String
+    ) async -> LyricsContent? {
+        var components = URLComponents(string: "https://lrclib.net/api/search")
+        components?.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist)
+        ]
+
+        guard let entries: [LRCEntry] = await fetchDecodable(from: components?.url) else {
+            return nil
+        }
+        for entry in entries {
+            if let content = resolvedLyrics(from: entry) {
+                return content
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func fetchDecodable<T: Decodable>(from url: URL?) async -> T? {
+        guard let url else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("Docky/1.0 (lyrics fetcher)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 8
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              http.statusCode == 200 else {
+            return nil
+        }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    nonisolated private static func resolvedLyrics(from entry: LRCEntry) -> LyricsContent? {
+        if entry.instrumental == true {
+            return LyricsContent(plain: "♪ Instrumental ♪", lines: [])
+        }
+        let synced = entry.syncedLyrics.map(parseLRC) ?? []
+        let plain: String = {
+            let plainCandidate = entry.plainLyrics?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !plainCandidate.isEmpty {
+                return plainCandidate
+            }
+            return synced.map(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }()
+        guard !plain.isEmpty || !synced.isEmpty else {
+            return nil
+        }
+        return LyricsContent(plain: plain, lines: synced)
+    }
+
+    nonisolated private static func parseLRC(_ raw: String) -> [SyncedLyricsLine] {
+        guard let pattern = try? NSRegularExpression(
+            pattern: #"\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\]"#
+        ) else {
+            return []
+        }
+
+        var result: [SyncedLyricsLine] = []
+        for rawLine in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+            let nsLine = line as NSString
+            let matches = pattern.matches(in: line, range: NSRange(location: 0, length: nsLine.length))
+            guard !matches.isEmpty else { continue }
+
+            let textStart = matches.map(\.range.upperBound).max() ?? 0
+            let text = nsLine.substring(from: textStart).trimmingCharacters(in: .whitespaces)
+
+            for match in matches {
+                let mmRange = match.range(at: 1)
+                let ssRange = match.range(at: 2)
+                let xxRange = match.range(at: 3)
+                guard let mm = Int(nsLine.substring(with: mmRange)),
+                      let ss = Int(nsLine.substring(with: ssRange)) else {
+                    continue
+                }
+
+                let fractional: TimeInterval
+                if xxRange.location != NSNotFound {
+                    fractional = Double("0.\(nsLine.substring(with: xxRange))") ?? 0
+                } else {
+                    fractional = 0
+                }
+
+                result.append(SyncedLyricsLine(time: TimeInterval(mm * 60 + ss) + fractional, text: text))
+            }
+        }
+
+        return result.sorted { $0.time < $1.time }
     }
 
     func setFavorite(_ favorite: Bool, for bundleIdentifier: String) async {

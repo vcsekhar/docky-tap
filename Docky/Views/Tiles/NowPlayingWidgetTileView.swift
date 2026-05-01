@@ -13,8 +13,10 @@ struct NowPlayingWidgetTileView: View {
     let renderedSpan: TileSpan
     let isWithinStack: Bool
     var isExpanded: Bool = false
+    var isExpandedPreviewOpen: Bool = false
     @ObservedObject private var mediaPlayback = MediaPlaybackService.shared
     @State private var isHovering = false
+    @State private var isLyricsOverlayPresented = false
 
     var body: some View {
         #if DEBUG
@@ -35,17 +37,10 @@ struct NowPlayingWidgetTileView: View {
                 }
 
                 content(layout: layout)
-                    .opacity(isExpanded ? 0 : 1)
-                    .animation(.easeOut(duration: 0.12), value: isExpanded)
+                    .opacity(isExpandedPreviewOpen && isExpanded ? 0 : 1)
 
                 if isExpanded {
                     expandedContent(layout: expandedLayout)
-                        .overlay {
-                            VStack {
-                                Text(proxy.size.debugDescription)
-                                Spacer()
-                            }
-                        }
                         .frame(height: proxy.size.height)
                         .transition(
                             .opacity.animation(
@@ -53,8 +48,18 @@ struct NowPlayingWidgetTileView: View {
                             ).combined(with: .scale).combined(with: .slide)
                         )
                 }
+
+                if isExpanded && isLyricsOverlayPresented {
+                    lyricsOverlay(layout: expandedLayout)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.18), value: isLyricsOverlayPresented)
+            .animation(.easeInOut(duration: 0.22), value: isExpanded)
+            .animation(.easeOut(duration: 0.12), value: isExpandedPreviewOpen)
         }
+        .opacity(isExpandedPreviewOpen && !isExpanded ? 0.5 : 1)
+        .animation(.easeOut(duration: 0.12), value: isExpandedPreviewOpen)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
@@ -243,8 +248,111 @@ struct NowPlayingWidgetTileView: View {
                     action: toggleFavorite
                 )
             }
+
+            if mediaPlayback.supportsLyrics(for: tile.ownerBundleIdentifier) {
+                expandedControlButton(
+                    "quote.bubble.fill",
+                    size: layout.controlButtonSize,
+                    iconSize: layout.controlIconSize,
+                    action: toggleLyricsOverlay
+                )
+            }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func toggleLyricsOverlay() {
+        if !isLyricsOverlayPresented {
+            mediaPlayback.requestLyrics(for: tile.ownerBundleIdentifier)
+        }
+        isLyricsOverlayPresented.toggle()
+    }
+
+    @ViewBuilder
+    private func lyricsOverlay(layout: ExpandedLayoutMetrics) -> some View {
+        let state = mediaPlayback.lyricsState(for: tile.ownerBundleIdentifier)
+
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+
+            ZStack(alignment: .leading) {
+                VStack {
+                    HStack {
+                        
+                        Spacer()
+
+                        Button {
+                            isLyricsOverlayPresented = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: layout.controlIconSize, weight: .semibold))
+                                .foregroundStyle(primaryForegroundColor)
+                                .frame(width: layout.controlButtonSize, height: layout.controlButtonSize)
+                                .background(
+                                    Circle()
+                                        .fill(secondaryForegroundColor.opacity(0.18))
+                                )
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    Spacer()
+                }
+
+                lyricsBody(state: state, layout: layout)
+            }
+            .padding(layout.contentPadding)
+        }
+        .onChange(of: trackChangeKey) {
+            mediaPlayback.requestLyrics(for: tile.ownerBundleIdentifier)
+        }
+    }
+
+    @ViewBuilder
+    private func lyricsBody(state: LyricsLoadState?, layout: ExpandedLayoutMetrics) -> some View {
+        switch state {
+        case .loaded(let content):
+            if content.hasSyncedLines {
+                KaraokeLyricsView(
+                    lines: content.lines,
+                    layout: layout,
+                    primaryColor: primaryForegroundColor,
+                    secondaryColor: secondaryForegroundColor,
+                    bundleIdentifier: tile.ownerBundleIdentifier,
+                    mediaPlayback: mediaPlayback
+                )
+            } else {
+                ScrollView {
+                    Text(content.plain)
+                        .font(.system(size: layout.subtitleFontSize))
+                        .foregroundStyle(primaryForegroundColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+            }
+        case .unavailable:
+            VStack {
+                Spacer()
+                Text("No lyrics available")
+                    .font(.system(size: layout.subtitleFontSize))
+                    .foregroundStyle(secondaryForegroundColor)
+                    .frame(maxWidth: .infinity)
+                Spacer()
+            }
+        case .loading, .none:
+            VStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var trackChangeKey: String {
+        "\(tile.ownerBundleIdentifier)|\(playbackState?.title ?? "")|\(playbackState?.artist ?? "")|\(playbackState?.album ?? "")"
     }
 
     private func expandedControlButton(_ systemName: String, size: CGFloat, iconSize: CGFloat, action: @escaping () -> Void) -> some View {
@@ -504,6 +612,93 @@ struct NowPlayingWidgetTileView: View {
         )
 
         return baseColor.withSystemEffect(.pressed)
+    }
+}
+
+private struct KaraokeLyricsView: View {
+    let lines: [SyncedLyricsLine]
+    let layout: ExpandedLayoutMetrics
+    let primaryColor: Color
+    let secondaryColor: Color
+    let bundleIdentifier: String
+    @ObservedObject var mediaPlayback: MediaPlaybackService
+    @State private var activeIndex = 0
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: layout.titleStackSpacing * 4) {
+                    Color.clear.frame(height: layout.controlButtonSize)
+
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        Text(line.text.isEmpty ? "♪" : line.text)
+                            .font(.system(
+                                size: layout.titleFontSize * 1.2,
+                                weight: .semibold,
+                                design: .rounded
+                            ))
+                            .foregroundStyle(index == activeIndex ? primaryColor : secondaryColor)
+                            .opacity(opacity(for: index))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(index)
+                            .animation(.easeInOut(duration: 0.22), value: activeIndex)
+                    }
+
+                    Color.clear.frame(height: layout.controlButtonSize)
+                }
+            }
+            .onChange(of: activeIndex) { _, newIndex in
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(newIndex, anchor: .center)
+                }
+            }
+            .onAppear {
+                proxy.scrollTo(activeIndex, anchor: .center)
+            }
+        }
+        .task {
+            await trackPlayback()
+        }
+    }
+
+    private func opacity(for index: Int) -> Double {
+        let distance = abs(index - activeIndex)
+        switch distance {
+        case 0: return 1.0
+        case 1: return 0.7
+        case 2: return 0.5
+        case 3: return 0.35
+        default: return 0.22
+        }
+    }
+
+    private func trackPlayback() async {
+        activeIndex = currentIndex(at: estimatedTime())
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(150))
+            if Task.isCancelled { return }
+            let newIndex = currentIndex(at: estimatedTime())
+            if newIndex != activeIndex {
+                activeIndex = newIndex
+            }
+        }
+    }
+
+    private func estimatedTime() -> TimeInterval {
+        mediaPlayback.state(for: bundleIdentifier)?.estimatedCurrentTime ?? 0
+    }
+
+    private func currentIndex(at time: TimeInterval) -> Int {
+        guard !lines.isEmpty else { return 0 }
+        var index = 0
+        for (i, line) in lines.enumerated() {
+            if line.time <= time + 0.05 {
+                index = i
+            } else {
+                break
+            }
+        }
+        return index
     }
 }
 

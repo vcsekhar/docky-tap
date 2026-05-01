@@ -196,6 +196,7 @@ struct CatalogActionDefinition: Codable, Identifiable {
     let path: [String]?
     let requiresFrontmost: Bool
     let holdOption: Bool
+    let symbol: String?
 }
 
 enum CatalogMenuItemType: String, Codable {

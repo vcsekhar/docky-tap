@@ -4,18 +4,24 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
-final class WidgetExpansionWindowController: NSWindowController {
+final class WidgetExpansionWindowController: NSWindowController, ObservableObject {
     static let shared = WidgetExpansionWindowController()
 
+    @Published private(set) var activeSourceTileID: String?
+
     private static let contentPadding: CGFloat = 8
+    private static let animationDuration: TimeInterval = 0.18
+    private static let slideOffset: CGFloat = 12
 
     private var currentTileID: String?
     private var isPreviewHovered = false
     private var isHoldingDockVisible = false
     private weak var heldMainWindow: MainWindow?
     private var pendingDismissTask: Task<Void, Never>?
+    private var dismissAnimationTask: Task<Void, Never>?
 
     private init() {
         let window = NSWindow(
@@ -47,8 +53,11 @@ final class WidgetExpansionWindowController: NSWindowController {
         guard let window else { return }
 
         currentTileID = sourceTileID
+        activeSourceTileID = sourceTileID
         pendingDismissTask?.cancel()
         pendingDismissTask = nil
+        dismissAnimationTask?.cancel()
+        dismissAnimationTask = nil
         beginDockVisibilityHoldIfNeeded()
 
         let baseTileSize = max(1, min(
@@ -73,7 +82,8 @@ final class WidgetExpansionWindowController: NSWindowController {
                 cornerRadius: cornerRadius,
                 renderedSpan: renderedSpan,
                 isWithinStack: false,
-                isExpanded: true
+                isExpanded: true,
+                isExpandedPreviewOpen: true
             )
             .frame(width: size.width, height: size.height)
             .padding(Self.contentPadding)
@@ -84,10 +94,22 @@ final class WidgetExpansionWindowController: NSWindowController {
             WidgetExpansionWindowController.shared.setPreviewHovered(isHovering, sourceTileID: sourceTileID)
         }
 
+        let finalOrigin = frameOrigin(for: windowSize, sourceFrame: sourceFrame)
+        let initialOrigin = CGPoint(x: finalOrigin.x, y: finalOrigin.y - Self.slideOffset)
+        let finalFrame = CGRect(origin: finalOrigin, size: windowSize)
+        let initialFrame = CGRect(origin: initialOrigin, size: windowSize)
+
         window.contentView = NSHostingView(rootView: rootView)
-        window.setContentSize(windowSize)
-        window.setFrameOrigin(frameOrigin(for: windowSize, sourceFrame: sourceFrame))
+        window.setFrame(initialFrame, display: false)
+        window.alphaValue = 0
         window.orderFront(nil)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.animationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().setFrame(finalFrame, display: true)
+            window.animator().alphaValue = 1
+        }
     }
 
     func dismiss(sourceTileID: String) {
@@ -97,7 +119,32 @@ final class WidgetExpansionWindowController: NSWindowController {
         isPreviewHovered = false
         endDockVisibilityHoldIfNeeded()
         currentTileID = nil
-        close()
+        activeSourceTileID = nil
+
+        guard let window, window.isVisible else {
+            close()
+            return
+        }
+
+        let currentFrame = window.frame
+        let targetFrame = currentFrame.offsetBy(dx: 0, dy: -Self.slideOffset)
+
+        dismissAnimationTask?.cancel()
+        dismissAnimationTask = Task { @MainActor in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = Self.animationDuration
+                    context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                    window.animator().setFrame(targetFrame, display: true)
+                    window.animator().alphaValue = 0
+                }, completionHandler: {
+                    continuation.resume()
+                })
+            }
+            if Task.isCancelled { return }
+            guard self.currentTileID == nil else { return }
+            self.close()
+        }
     }
 
     func requestDismiss(sourceTileID: String) {
