@@ -276,7 +276,7 @@ struct PermissionsView: View {
     }
 
     private var skipButton: some View {
-        Button("Skip") { advance() }
+        Button("Skip") { skipCurrentStep() }
             .onboardingButtonStyle()
     }
 
@@ -393,6 +393,11 @@ struct PermissionsView: View {
             currentIndex += 1
             openNextStepSystemSettings()
         }
+    }
+
+    private func skipCurrentStep() {
+        service.markPermissionSkipped(step)
+        advance()
     }
 
     private func openNextStepSystemSettings() {

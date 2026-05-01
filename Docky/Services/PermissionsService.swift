@@ -132,6 +132,7 @@ final class PermissionsService: ObservableObject {
     private let finderAutomationStatusKey = "docky.finderAutomationStatus"
     private let systemEventsAutomationStatusKey = "docky.systemEventsAutomationStatus"
     private let initialOnboardingCompletedKey = "docky.initialOnboardingCompleted"
+    private let skippedPermissionsKey = "docky.skippedPermissions"
 
     private init() {
         clearLegacyBookmarks()
@@ -161,6 +162,10 @@ final class PermissionsService: ObservableObject {
 
     var setupPermissions: [Permission] {
         Permission.allCases.filter {
+            if hasSkippedPermission($0) {
+                return false
+            }
+
             if $0.isRequiredAtLaunch {
                 return status(for: $0) != .granted
             }
@@ -197,7 +202,21 @@ final class PermissionsService: ObservableObject {
         UserDefaults.standard.set(true, forKey: initialOnboardingCompletedKey)
     }
 
+    func markPermissionSkipped(_ permission: Permission) {
+        var skippedPermissions = skippedPermissionIDs
+        skippedPermissions.insert(permission.rawValue)
+        UserDefaults.standard.set(Array(skippedPermissions), forKey: skippedPermissionsKey)
+    }
+
+    func hasSkippedPermission(_ permission: Permission) -> Bool {
+        skippedPermissionIDs.contains(permission.rawValue)
+    }
+
     // MARK: - Grant actions
+
+    private var skippedPermissionIDs: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: skippedPermissionsKey) ?? [])
+    }
 
     func openSystemSettings(for permission: Permission) {
         guard let url = permission.systemSettingsURL else { return }
