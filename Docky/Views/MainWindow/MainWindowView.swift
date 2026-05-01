@@ -17,6 +17,10 @@ struct MainWindowView: View {
     @ObservedObject private var layoutService = DockLayoutService.shared
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         let cornerRadius = effectiveCornerRadius
         let chromeFrameSize = resolvedChromeFrameSize
         let dockEdge = dockEdgeAlignment

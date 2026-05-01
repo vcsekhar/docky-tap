@@ -13,6 +13,10 @@ struct WidgetTileView: View {
     var isExpanded: Bool = false
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         switch tile.kind {
         case .calendar, .calendarDate:
             CalendarWidgetTileView(

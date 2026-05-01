@@ -92,6 +92,10 @@ struct AppFolderTileView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -304,6 +308,10 @@ struct AppFolderPopoverView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         VStack(spacing: 0) {
             HStack {
                 Text(tile.displayName)

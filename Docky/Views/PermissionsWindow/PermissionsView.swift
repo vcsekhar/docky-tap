@@ -36,6 +36,10 @@ struct PermissionsView: View {
     private var isLastStep: Bool { currentIndex == steps.count - 1 }
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         cardView
         .padding(.top, topBarAdjustment)
         .background(

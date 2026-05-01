@@ -170,6 +170,10 @@ private struct LaunchpadOverlayView: View {
     private let appCardScale: CGFloat = 1.5
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         GeometryReader { proxy in
             let contentWidth = min(proxy.size.width - 96, 1440)
             let columnCount = gridColumnCount(for: proxy.size.width)

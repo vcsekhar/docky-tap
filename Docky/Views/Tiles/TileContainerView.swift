@@ -35,6 +35,10 @@ struct TileContainerView: View {
     @State private var tileFrames: [String: CGRect] = [:]
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         GeometryReader { proxy in
             overflowWrappedContent(in: proxy)
             .onPreferenceChange(TileFramePreferenceKey.self) { tileFrames = $0 }

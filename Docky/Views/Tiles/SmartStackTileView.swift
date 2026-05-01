@@ -18,6 +18,10 @@ struct SmartStackTileView: View {
     @State private var indicatorHideWorkItem: DispatchWorkItem?
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         SmartStackScrollHostingView(content: contentView) { deltaX, deltaY in
             handleScroll(deltaX: deltaX, deltaY: deltaY)
         }

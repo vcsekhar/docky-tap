@@ -202,6 +202,10 @@ private struct WindowSwitcherOverlayView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         GeometryReader { proxy in
             ZStack {
                 Color.black.opacity(switcher.focusedPreview == nil ? 0 : 0.6)

@@ -20,6 +20,10 @@ struct CalendarWidgetTileView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         TimelineView(.periodic(from: .now, by: 60)) { context in
             GeometryReader { proxy in
                 let layout = layout(in: proxy.size)

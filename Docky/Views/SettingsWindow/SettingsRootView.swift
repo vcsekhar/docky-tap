@@ -110,6 +110,10 @@ struct SettingsRootView: View {
     @State private var selection: SettingsPane = .product
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         NavigationSplitView {
             List(SettingsPane.allCases, selection: $selection) { pane in
                 HStack(spacing: 10) {

@@ -191,6 +191,10 @@ private struct SmartOrganizeProgressChipView: View {
     @ObservedObject private var progress = SmartOrganizeProgressService.shared
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         HStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)

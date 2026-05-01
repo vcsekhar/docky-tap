@@ -53,6 +53,10 @@ struct FolderPopoverView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = Self._printChanges()
+        #endif
+
         bodyContent
             .onDrop(of: [UTType.fileURL], delegate: FolderPopoverDropDelegate(
                 destinationURL: currentEntry.url,
