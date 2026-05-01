@@ -15,6 +15,7 @@ final class WidgetExpansionWindowController: NSWindowController, ObservableObjec
     private static let contentPadding: CGFloat = 8
     private static let animationDuration: TimeInterval = 0.18
     private static let slideOffset: CGFloat = 12
+    private static let minimumExpansionBaseTileSize: CGFloat = 80
 
     private var currentTileID: String?
     private var isPreviewHovered = false
@@ -60,10 +61,11 @@ final class WidgetExpansionWindowController: NSWindowController, ObservableObjec
         dismissAnimationTask = nil
         beginDockVisibilityHoldIfNeeded()
 
-        let baseTileSize = max(1, min(
+        let resolvedTileSize = max(1, min(
             sourceFrame.height,
             sourceFrame.width / CGFloat(max(renderedSpan.rawValue, 1))
         ))
+        let baseTileSize = max(Self.minimumExpansionBaseTileSize, resolvedTileSize)
         let extent = widget.kind.expansionExtent
         let size = CGSize(
             width: baseTileSize * CGFloat(extent.widthTiles),
