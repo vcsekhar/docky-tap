@@ -13,6 +13,7 @@ import SwiftUI
 struct TileView: View {
     let tile: Tile
     let isDragging: Bool
+    let isDocumentDropTarget: Bool
     @ObservedObject private var dockSettings = DockSettingsService.shared
     @ObservedObject private var layout = DockLayoutService.shared
     @ObservedObject private var preferences = DockyPreferences.shared
@@ -21,10 +22,10 @@ struct TileView: View {
     @ObservedObject private var mediaPlayback = MediaPlaybackService.shared
     @ObservedObject private var editMode = DockEditModeService.shared
     @ObservedObject private var widgetExpansion = WidgetExpansionWindowController.shared
-    @ObservedObject private var dockDrag = DockDragService.shared
     @State private var isHovering = false
     @State private var isTooltipPresented = false
     @State private var tooltipDelayTask: Task<Void, Never>?
+    @State private var globalTileFrame: CGRect = .zero
     @State private var isFolderPopoverPresented = false
     @State private var isFolderListMenuPresented = false
     @State private var isAppFolderPopoverPresented = false
@@ -37,13 +38,10 @@ struct TileView: View {
     private static let finderBundleIdentifier = "com.apple.finder"
     private static let folderPopoverRetapGuardInterval: TimeInterval = 0.25
 
-    private var isDocumentDropTarget: Bool {
-        dockDrag.documentTargetTileID == tile.id
-    }
-
-    init(tile: Tile, isDragging: Bool = false) {
+    init(tile: Tile, isDragging: Bool = false, isDocumentDropTarget: Bool = false) {
         self.tile = tile
         self.isDragging = isDragging
+        self.isDocumentDropTarget = isDocumentDropTarget
         self._dockSettings = ObservedObject(wrappedValue: DockSettingsService.shared)
         self._layout = ObservedObject(wrappedValue: DockLayoutService.shared)
         self._preferences = ObservedObject(wrappedValue: DockyPreferences.shared)
@@ -52,7 +50,6 @@ struct TileView: View {
         self._mediaPlayback = ObservedObject(wrappedValue: MediaPlaybackService.shared)
         self._editMode = ObservedObject(wrappedValue: DockEditModeService.shared)
         self._widgetExpansion = ObservedObject(wrappedValue: WidgetExpansionWindowController.shared)
-        self._dockDrag = ObservedObject(wrappedValue: DockDragService.shared)
     }
 
     private func contextActions(modifierFlags: NSEvent.ModifierFlags) -> [ContextAction] {
@@ -411,12 +408,13 @@ struct TileView: View {
             .contentShape(Rectangle())
             .onHover(perform: updateHoverState)
             .onTapGesture(perform: handleTap)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.onChange(of: isHovering) { _, isHovering in
-                        updateWidgetExpansionPresentation(isHovering: isHovering, sourceFrame: proxy.frame(in: .global))
-                    }
-                }
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { newFrame in
+                globalTileFrame = newFrame
+            }
+            .onChange(of: isHovering) { _, isHovering in
+                updateWidgetExpansionPresentation(isHovering: isHovering, sourceFrame: globalTileFrame)
             }
             .onDisappear {
                 widgetExpansionTask?.cancel()
@@ -540,10 +538,9 @@ struct TileView: View {
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             }
         case .folder, .trash:
-            GeometryReader { _ in
-                displayedContent
-                    .padding(contentPaddingEdges, contentPadding)
-            }
+            displayedContent
+                .padding(contentPaddingEdges, contentPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .app, .minimizedWindow, .spacer, .divider:
             displayedContent
                 .padding(contentPaddingEdges, contentPadding)
@@ -1754,9 +1751,11 @@ private struct TileTooltipPopoverPresenter: NSViewRepresentable {
         private let hostingController = NSHostingController(rootView: TileTooltipView(title: ""))
         private let popover = NSPopover()
         private var preferredEdge: NSRectEdge
+        private var currentTitle: String
 
         init(title: String, preferredEdge: NSRectEdge) {
             self.preferredEdge = preferredEdge
+            self.currentTitle = title
             hostingController.rootView = TileTooltipView(title: title)
             popover.contentViewController = hostingController
             popover.animates = false
@@ -1766,6 +1765,8 @@ private struct TileTooltipPopoverPresenter: NSViewRepresentable {
 
         func update(title: String, preferredEdge: NSRectEdge) {
             self.preferredEdge = preferredEdge
+            guard title != currentTitle else { return }
+            currentTitle = title
             hostingController.rootView = TileTooltipView(title: title)
             updateContentSize()
         }
