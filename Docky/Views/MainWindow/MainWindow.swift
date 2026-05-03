@@ -66,8 +66,8 @@ final class MainWindowContainerView: NSView {
 }
 
 final class MainWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 
     override var level: NSWindow.Level { get { .mainMenu } set {} }
 
