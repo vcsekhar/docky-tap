@@ -192,9 +192,12 @@ final class TileStore: ObservableObject {
         let refreshedPinnedTiles = apps.enumerated().compactMap { index, entry in
             Self.parse(entry: entry, fallbackID: Self.fallbackTileID(for: entry, at: index, section: "persistent-apps"))
         }
-        dockPinnedTilesByBundleIdentifier = Dictionary(uniqueKeysWithValues: refreshedPinnedTiles.compactMap { tile in
-            bundleIdentifier(of: tile).map { ($0, tile) }
-        })
+        dockPinnedTilesByBundleIdentifier = Dictionary(
+            refreshedPinnedTiles.compactMap { tile in
+                bundleIdentifier(of: tile).map { ($0, tile) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         if syncPreferencesFromSystemDock {
             seedPinnedPreferencesIfNeeded(from: refreshedPinnedTiles)
             mergePinnedPreferencesAdditionsIfNeeded(from: refreshedPinnedTiles)
@@ -2262,7 +2265,8 @@ final class TileStore: ObservableObject {
     ) -> [RunningApp] {
         let hiddenBundleIDs = Set(preferences.hiddenAppBundleIdentifiers)
         let currentMap = Dictionary(
-            uniqueKeysWithValues: currentUnpinned.map { ($0.bundleIdentifier, $0) }
+            currentUnpinned.map { ($0.bundleIdentifier, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let lastIndex = displayedRunning.count - 1
 
