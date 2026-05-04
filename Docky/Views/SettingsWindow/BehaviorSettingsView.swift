@@ -46,7 +46,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var placementSection: some View {
-        Section("Placement") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Window Position")
@@ -117,7 +117,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var visibilitySection: some View {
-        Section("Visibility") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Autohide Window", isOn: $preferences.autohidesWindow)
                     .font(.headline)
@@ -229,7 +229,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var appTileClickSection: some View {
-        Section("App Tile Click") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("When App Is Already Active")
@@ -256,7 +256,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var widgetsSection: some View {
-        Section("Widgets") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Show Expanded Preview on Hover", isOn: $preferences.enablesWidgetHoverPreview)
                     .font(.headline)
@@ -310,7 +310,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var launchSection: some View {
-        Section("Launch") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Open at Login", isOn: $preferences.opensAtLogin)
                     .font(.headline)
@@ -325,7 +325,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var systemDockSection: some View {
-        Section("System Dock") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Hide System Dock", isOn: $preferences.hidesSystemDock)
                     .font(.headline)
@@ -345,7 +345,7 @@ struct BehaviorSettingsView: View {
 
     @ViewBuilder
     private var appFoldersSection: some View {
-        Section("App Folders") {
+        Section {
             if !product.isUnlocked(.groupedAppFolders) {
                 ProFeatureNotice(feature: .groupedAppFolders)
             }

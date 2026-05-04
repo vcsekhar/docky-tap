@@ -39,7 +39,7 @@ struct AppearanceSettingsView: View {
 
     @ViewBuilder
     private var indicatorsSection: some View {
-        Section("Indicators") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Active Indicator Shape")
@@ -96,7 +96,7 @@ struct AppearanceSettingsView: View {
 
     @ViewBuilder
     private var tileLayoutSection: some View {
-        Section("Tile Layout") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Tile Clip Shape")
@@ -203,7 +203,7 @@ struct AppearanceSettingsView: View {
 
     @ViewBuilder
     private var windowShapeSection: some View {
-        Section("Window Shape") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Chrome Clip Shape")
@@ -265,7 +265,7 @@ struct AppearanceSettingsView: View {
 
     @ViewBuilder
     private var windowBackgroundSection: some View {
-        Section("Window Background") {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Window Background Image")
                     .font(.headline)
