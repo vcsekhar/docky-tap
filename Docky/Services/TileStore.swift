@@ -2337,7 +2337,7 @@ final class TileStore: ObservableObject {
         )
     }
 
-    nonisolated private static func tile(for minimizedWindow: MinimizedWindowTile) -> Tile {
+    nonisolated private static func tile(for minimizedWindow: AppWindow) -> Tile {
         Tile(id: "minimized-window:\(minimizedWindow.windowIdentifier)", content: .minimizedWindow(minimizedWindow))
     }
 

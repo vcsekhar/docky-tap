@@ -1,0 +1,697 @@
+//
+//  WindowRegistry.swift
+//  Docky
+//
+//  Single source of truth for "what windows exist right now" across all
+//  running apps. Subscribes per-app to AX notifications and maintains a
+//  long-lived `[AppWindow]` whose identity is the underlying `AXUIElement`.
+//
+//  Why this exists:
+//  - The poll-and-rebuild approach (re-enumerate AX windows on each call,
+//    match by derived identifier strings) is fragile under title changes,
+//    AX reordering, or rapid focus cycling. Identifying a window by the
+//    actual AXUIElement is stable for the lifetime of the window, so a
+//    raise/minimize/close call always targets the picked window or fails
+//    cleanly when the window is gone.
+//  - The list is kept fresh in the background, so consumers (window
+//    switcher, tile click logic) read a ready snapshot instead of paying
+//    the enumeration cost each interaction.
+//
+//  Threading: this class is not `@MainActor`-annotated (matching the rest
+//  of the services) but all mutation happens on main — AX observers are
+//  added to the main run loop, and `NSWorkspace` notifications are
+//  delivered on the main queue.
+//
+
+import AppKit
+import ApplicationServices
+import Combine
+
+private let axWindowNumberAttribute = "AXWindowNumber" as CFString
+private let axCloseAction = "AXClose" as CFString
+private let minimumTrackedWindowSize = CGSize(width: 100, height: 100)
+
+/// Stable, opaque identity for an `AppWindow`. Backed by the
+/// `AXUIElement`'s CF identity — equal and hashable across the lifetime
+/// of the underlying window.
+nonisolated struct WindowID: Hashable {
+    nonisolated fileprivate let element: AXUIElement
+
+    nonisolated static func == (lhs: WindowID, rhs: WindowID) -> Bool {
+        CFEqual(lhs.element, rhs.element)
+    }
+
+    nonisolated func hash(into hasher: inout Hasher) {
+        hasher.combine(Int(bitPattern: CFHash(element)))
+    }
+
+    /// Stable string form for callers that need a string key (preview cache
+    /// keys, debug logs). Stable within a single process run but not across
+    /// launches.
+    nonisolated var stableString: String {
+        String(format: "ax:%lx", CFHash(element))
+    }
+}
+
+/// A window observed in the registry. Identity is the underlying
+/// `AXUIElement`; all other fields are best-effort snapshots updated as
+/// AX notifications arrive.
+struct AppWindow: Identifiable, Hashable {
+    nonisolated fileprivate let element: AXUIElement
+    nonisolated let bundleIdentifier: String
+    nonisolated let processIdentifier: pid_t
+    nonisolated let appDisplayName: String
+    nonisolated let windowTitle: String
+    nonisolated let isMinimized: Bool
+    nonisolated let windowNumber: Int?
+    nonisolated let frame: CGRect?
+
+    nonisolated var id: WindowID { WindowID(element: element) }
+
+    /// Compatibility alias matching the previous API surface.
+    nonisolated var windowIdentifier: String { id.stableString }
+
+    /// Compatibility alias matching the previous API surface.
+    nonisolated var screenBounds: CGRect? { frame }
+
+    nonisolated static func == (lhs: AppWindow, rhs: AppWindow) -> Bool {
+        CFEqual(lhs.element, rhs.element)
+            && lhs.bundleIdentifier == rhs.bundleIdentifier
+            && lhs.processIdentifier == rhs.processIdentifier
+            && lhs.appDisplayName == rhs.appDisplayName
+            && lhs.windowTitle == rhs.windowTitle
+            && lhs.isMinimized == rhs.isMinimized
+            && lhs.windowNumber == rhs.windowNumber
+            && lhs.frame == rhs.frame
+    }
+
+    nonisolated func hash(into hasher: inout Hasher) {
+        hasher.combine(WindowID(element: element))
+    }
+}
+
+final class WindowRegistry: ObservableObject {
+    static let shared = WindowRegistry()
+
+    /// Observed-order window list across all tracked apps. Order is stable:
+    /// new windows are appended; updates land in place; removals leave a
+    /// hole that the next snapshot fills.
+    @Published private(set) var windows: [AppWindow] = []
+
+    /// Windows currently minimized, in observation order. Newest minimized
+    /// last — `last(where: bundleID:)` gives the most-recently minimized.
+    var minimized: [AppWindow] {
+        windows.filter(\.isMinimized)
+    }
+
+    /// Windows that are visible (non-minimized) and large enough to be
+    /// interactable — the natural "switchable" set.
+    var visible: [AppWindow] {
+        windows.filter { window in
+            guard !window.isMinimized else { return false }
+            guard let size = window.frame?.size else { return true }
+            return size.width >= minimumTrackedWindowSize.width
+                && size.height >= minimumTrackedWindowSize.height
+        }
+    }
+
+    private var applicationObservers: [pid_t: AXObserver] = [:]
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var permissionsCancellable: AnyCancellable?
+    private var observationsActive = false
+
+    private init() {
+        permissionsCancellable = PermissionsService.shared.$accessibility
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self else { return }
+                if status == .granted {
+                    self.startObservingIfNeeded()
+                } else {
+                    self.stopObserving()
+                }
+            }
+
+        if PermissionsService.shared.accessibility == .granted {
+            startObservingIfNeeded()
+        }
+    }
+
+    deinit {
+        stopObserving()
+    }
+
+    // MARK: - Lookup
+
+    func windows(forBundleIdentifier bundleIdentifier: String) -> [AppWindow] {
+        windows.filter { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    func windowsByRecency(forBundleIdentifier bundleIdentifier: String) -> [AppWindow] {
+        // Observation order is the closest stand-in for recency we have
+        // without a focus-history channel; later entries are the most
+        // recently-touched windows for that app.
+        windows(forBundleIdentifier: bundleIdentifier)
+    }
+
+    // MARK: - Window operations
+
+    /// Brings `window` to the front. Uses the cached `AXUIElement` so the
+    /// raise targets exactly the picked window (or fails cleanly if it has
+    /// been destroyed). The app activate is dispatched to the next main-run
+    /// turn so it doesn't reorder windows before the raise lands.
+    @discardableResult
+    func focus(_ window: AppWindow) -> Bool {
+        guard PermissionsService.shared.accessibility == .granted else {
+            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "focus app windows")
+            return false
+        }
+
+        let element = window.element
+
+        let restored: Bool
+        if window.isMinimized {
+            restored = AXUIElementSetAttributeValue(
+                element,
+                kAXMinimizedAttribute as CFString,
+                kCFBooleanFalse
+            ) == .success
+        } else {
+            restored = true
+        }
+
+        let raised = AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success
+
+        if let runningApp = NSRunningApplication(processIdentifier: window.processIdentifier) {
+            DispatchQueue.main.async {
+                runningApp.unhide()
+                _ = runningApp.activate()
+            }
+        }
+
+        return restored && raised
+    }
+
+    @discardableResult
+    func minimize(_ window: AppWindow) -> Bool {
+        guard PermissionsService.shared.accessibility == .granted else {
+            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "minimize app windows")
+            return false
+        }
+
+        return AXUIElementSetAttributeValue(
+            window.element,
+            kAXMinimizedAttribute as CFString,
+            kCFBooleanTrue
+        ) == .success
+    }
+
+    @discardableResult
+    func close(_ window: AppWindow) -> Bool {
+        guard PermissionsService.shared.accessibility == .granted else {
+            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "close app windows")
+            return false
+        }
+
+        let element = window.element
+        if AXUIElementPerformAction(element, axCloseAction) == .success {
+            return true
+        }
+        return closeViaButton(element)
+    }
+
+    private func closeViaButton(_ windowElement: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                windowElement,
+                kAXCloseButtonAttribute as CFString,
+                &value
+              ) == .success,
+              let value,
+              CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            return false
+        }
+
+        let closeButton = value as! AXUIElement
+        return AXUIElementPerformAction(closeButton, kAXPressAction as CFString) == .success
+    }
+
+    // MARK: - Observation lifecycle
+
+    private func startObservingIfNeeded() {
+        guard !observationsActive else { return }
+        observationsActive = true
+
+        subscribeToWorkspaceLifecycle()
+        let apps = currentRegularApps()
+        for app in apps {
+            installObserver(for: app)
+        }
+        rebuildSnapshot()
+    }
+
+    private func stopObserving() {
+        guard observationsActive else { return }
+        observationsActive = false
+
+        for observer in workspaceObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        workspaceObservers.removeAll()
+
+        for (_, observer) in applicationObservers {
+            CFRunLoopRemoveSource(
+                CFRunLoopGetMain(),
+                AXObserverGetRunLoopSource(observer),
+                .commonModes
+            )
+        }
+        applicationObservers.removeAll()
+
+        if !windows.isEmpty {
+            windows = []
+        }
+    }
+
+    private func subscribeToWorkspaceLifecycle() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            center.addObserver(
+                forName: NSWorkspace.didLaunchApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handleAppLaunched(notification)
+            },
+            center.addObserver(
+                forName: NSWorkspace.didTerminateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handleAppTerminated(notification)
+            },
+            center.addObserver(
+                forName: NSWorkspace.didHideApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let pid = (notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier else { return }
+                self?.removeWindows(for: pid)
+            },
+            center.addObserver(
+                forName: NSWorkspace.didUnhideApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let pid = (notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier else { return }
+                self?.syncWindows(for: pid)
+            },
+        ]
+    }
+
+    private func handleAppLaunched(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.activationPolicy == .regular else {
+            return
+        }
+        installObserver(for: app)
+        // AX may not be ready immediately after launch — defer one tick.
+        DispatchQueue.main.async { [weak self] in
+            self?.syncWindows(for: app.processIdentifier)
+        }
+    }
+
+    private func handleAppTerminated(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+        removeObserver(for: app.processIdentifier)
+        removeWindows(for: app.processIdentifier)
+    }
+
+    private func currentRegularApps() -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+    }
+
+    // MARK: - Per-app AX observer
+
+    private func installObserver(for app: NSRunningApplication) {
+        let pid = app.processIdentifier
+        guard pid > 0,
+              applicationObservers[pid] == nil else {
+            return
+        }
+
+        var observer: AXObserver?
+        let createStatus = AXObserverCreate(pid, axObserverCallback, &observer)
+        guard createStatus == .success, let observer else {
+            return
+        }
+
+        applicationObservers[pid] = observer
+
+        let appElement = AXUIElementCreateApplication(pid)
+        let context = Unmanaged.passUnretained(self).toOpaque()
+
+        let notifications: [CFString] = [
+            kAXWindowCreatedNotification as CFString,
+            kAXUIElementDestroyedNotification as CFString,
+            kAXWindowMovedNotification as CFString,
+            kAXWindowResizedNotification as CFString,
+            kAXWindowMiniaturizedNotification as CFString,
+            kAXWindowDeminiaturizedNotification as CFString,
+            kAXTitleChangedNotification as CFString,
+            kAXFocusedWindowChangedNotification as CFString,
+            kAXMainWindowChangedNotification as CFString,
+            kAXApplicationActivatedNotification as CFString,
+            kAXApplicationHiddenNotification as CFString,
+            kAXApplicationShownNotification as CFString,
+        ]
+
+        for name in notifications {
+            _ = AXObserverAddNotification(observer, appElement, name, context)
+        }
+
+        CFRunLoopAddSource(
+            CFRunLoopGetMain(),
+            AXObserverGetRunLoopSource(observer),
+            .commonModes
+        )
+    }
+
+    private func removeObserver(for pid: pid_t) {
+        guard let observer = applicationObservers.removeValue(forKey: pid) else {
+            return
+        }
+        CFRunLoopRemoveSource(
+            CFRunLoopGetMain(),
+            AXObserverGetRunLoopSource(observer),
+            .commonModes
+        )
+    }
+
+    private func pid(for observer: AXObserver) -> pid_t? {
+        applicationObservers.first(where: { $0.value === observer })?.key
+    }
+
+    fileprivate func handleNotification(
+        observer: AXObserver,
+        element: AXUIElement,
+        notificationName: CFString
+    ) {
+        guard let pid = pid(for: observer) else { return }
+        let name = notificationName as String
+
+        switch name {
+        case kAXWindowCreatedNotification,
+             kAXWindowMiniaturizedNotification,
+             kAXWindowDeminiaturizedNotification,
+             kAXApplicationActivatedNotification,
+             kAXApplicationShownNotification,
+             kAXFocusedWindowChangedNotification,
+             kAXMainWindowChangedNotification:
+            syncWindows(for: pid)
+
+        case kAXWindowMovedNotification, kAXWindowResizedNotification:
+            updateFrameOrSync(element: element, pid: pid)
+
+        case kAXTitleChangedNotification:
+            updateTitleOrSync(element: element, pid: pid)
+
+        case kAXApplicationHiddenNotification:
+            removeWindows(for: pid)
+
+        case kAXUIElementDestroyedNotification:
+            removeWindow(matching: element, pid: pid)
+
+        default:
+            break
+        }
+    }
+
+    // MARK: - Snapshot mutation
+
+    private func rebuildSnapshot() {
+        var collected: [AppWindow] = []
+        for app in currentRegularApps() {
+            collected.append(contentsOf: enumerateWindows(for: app))
+        }
+        applyOrdered(collected)
+    }
+
+    private func syncWindows(for pid: pid_t) {
+        guard let app = NSRunningApplication(processIdentifier: pid),
+              app.activationPolicy == .regular else {
+            removeWindows(for: pid)
+            return
+        }
+
+        let updated = enumerateWindows(for: app)
+        replaceWindows(forPID: pid, with: updated)
+    }
+
+    private func enumerateWindows(for app: NSRunningApplication) -> [AppWindow] {
+        let pid = app.processIdentifier
+        guard pid > 0 else { return [] }
+
+        let bundleID = app.bundleIdentifier ?? "pid:\(pid)"
+        let displayName = app.localizedName ?? bundleID
+
+        let appElement = AXUIElementCreateApplication(pid)
+
+        var rawWindows: CFArray?
+        guard AXUIElementCopyAttributeValues(
+                appElement,
+                kAXWindowsAttribute as CFString,
+                0,
+                256,
+                &rawWindows
+              ) == .success,
+              let elements = rawWindows as? [AXUIElement] else {
+            return []
+        }
+
+        var seen = Set<WindowID>()
+        var result: [AppWindow] = []
+        for element in elements where role(of: element) == kAXWindowRole as String {
+            let id = WindowID(element: element)
+            guard !seen.contains(id) else { continue }
+            seen.insert(id)
+            if let window = makeAppWindow(
+                element: element,
+                bundleIdentifier: bundleID,
+                processIdentifier: pid,
+                appDisplayName: displayName
+            ) {
+                result.append(window)
+            }
+        }
+        return result
+    }
+
+    private func makeAppWindow(
+        element: AXUIElement,
+        bundleIdentifier: String,
+        processIdentifier: pid_t,
+        appDisplayName: String
+    ) -> AppWindow? {
+        let title = stringAttribute(kAXTitleAttribute as CFString, of: element)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = (title?.isEmpty ?? true) ? appDisplayName : (title ?? appDisplayName)
+        let isMinimized = boolAttribute(kAXMinimizedAttribute as CFString, of: element) ?? false
+        let windowNumber = intAttribute(axWindowNumberAttribute, of: element)
+        let frame = frameAttribute(of: element)
+
+        return AppWindow(
+            element: element,
+            bundleIdentifier: bundleIdentifier,
+            processIdentifier: processIdentifier,
+            appDisplayName: appDisplayName,
+            windowTitle: resolvedTitle,
+            isMinimized: isMinimized,
+            windowNumber: windowNumber,
+            frame: frame
+        )
+    }
+
+    private func replaceWindows(forPID pid: pid_t, with updatedWindows: [AppWindow]) {
+        var next = windows
+        let insertIndex = next.firstIndex(where: { $0.processIdentifier == pid }) ?? next.count
+        next.removeAll { $0.processIdentifier == pid }
+        next.insert(contentsOf: updatedWindows, at: min(insertIndex, next.count))
+        applyOrdered(next)
+    }
+
+    private func removeWindows(for pid: pid_t) {
+        guard windows.contains(where: { $0.processIdentifier == pid }) else { return }
+        windows.removeAll { $0.processIdentifier == pid }
+    }
+
+    private func removeWindow(matching element: AXUIElement, pid: pid_t) {
+        let target = WindowID(element: element)
+        if let index = windows.firstIndex(where: { $0.id == target }) {
+            windows.remove(at: index)
+        } else {
+            // Element pointer mismatch can happen for some apps — fall back
+            // to a per-app sync to keep state correct.
+            syncWindows(for: pid)
+        }
+    }
+
+    private func updateFrameOrSync(element: AXUIElement, pid: pid_t) {
+        let target = WindowID(element: element)
+        guard let index = windows.firstIndex(where: { $0.id == target }) else {
+            syncWindows(for: pid)
+            return
+        }
+
+        let existing = windows[index]
+        let newFrame = frameAttribute(of: element)
+        guard existing.frame != newFrame else { return }
+
+        windows[index] = AppWindow(
+            element: existing.element,
+            bundleIdentifier: existing.bundleIdentifier,
+            processIdentifier: existing.processIdentifier,
+            appDisplayName: existing.appDisplayName,
+            windowTitle: existing.windowTitle,
+            isMinimized: existing.isMinimized,
+            windowNumber: existing.windowNumber,
+            frame: newFrame
+        )
+    }
+
+    private func updateTitleOrSync(element: AXUIElement, pid: pid_t) {
+        let target = WindowID(element: element)
+        guard let index = windows.firstIndex(where: { $0.id == target }) else {
+            // Title-changed can fire for non-window elements (menu items,
+            // sheets); ignore unless we know the window.
+            return
+        }
+
+        let existing = windows[index]
+        let newTitle = stringAttribute(kAXTitleAttribute as CFString, of: element)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedTitle = newTitle.isEmpty ? existing.appDisplayName : newTitle
+        guard resolvedTitle != existing.windowTitle else { return }
+
+        windows[index] = AppWindow(
+            element: existing.element,
+            bundleIdentifier: existing.bundleIdentifier,
+            processIdentifier: existing.processIdentifier,
+            appDisplayName: existing.appDisplayName,
+            windowTitle: resolvedTitle,
+            isMinimized: existing.isMinimized,
+            windowNumber: existing.windowNumber,
+            frame: existing.frame
+        )
+    }
+
+    private func applyOrdered(_ snapshot: [AppWindow]) {
+        // Preserve insertion order: existing windows keep their slot and
+        // pick up the latest fields from the snapshot; newly-observed
+        // windows are appended in the order AX returned them.
+        var remaining = Set(snapshot.map(\.id))
+        var orderedExisting: [AppWindow] = []
+        for window in windows where remaining.contains(window.id) {
+            if let updated = snapshot.first(where: { $0.id == window.id }) {
+                orderedExisting.append(updated)
+            } else {
+                orderedExisting.append(window)
+            }
+            remaining.remove(window.id)
+        }
+        let newcomers = snapshot.filter { remaining.contains($0.id) }
+        let next = orderedExisting + newcomers
+        if next != windows {
+            windows = next
+        }
+    }
+
+    // MARK: - AX attribute helpers
+
+    private func role(of element: AXUIElement) -> String? {
+        stringAttribute(kAXRoleAttribute as CFString, of: element)
+    }
+
+    private func stringAttribute(_ attribute: CFString, of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+
+    private func boolAttribute(_ attribute: CFString, of element: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+        return (value as? NSNumber)?.boolValue
+    }
+
+    private func intAttribute(_ attribute: CFString, of element: AXUIElement) -> Int? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+        return (value as? NSNumber)?.intValue
+    }
+
+    private func frameAttribute(of element: AXUIElement) -> CGRect? {
+        guard let position = pointAttribute(kAXPositionAttribute as CFString, of: element),
+              let size = sizeAttribute(kAXSizeAttribute as CFString, of: element) else {
+            return nil
+        }
+        return CGRect(origin: position, size: size)
+    }
+
+    private func pointAttribute(_ attribute: CFString, of element: AXUIElement) -> CGPoint? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let axValue = value as! AXValue
+        guard AXValueGetType(axValue) == .cgPoint else { return nil }
+
+        var point = CGPoint.zero
+        guard AXValueGetValue(axValue, .cgPoint, &point) else { return nil }
+        return point
+    }
+
+    private func sizeAttribute(_ attribute: CFString, of element: AXUIElement) -> CGSize? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let axValue = value as! AXValue
+        guard AXValueGetType(axValue) == .cgSize else { return nil }
+
+        var size = CGSize.zero
+        guard AXValueGetValue(axValue, .cgSize, &size) else { return nil }
+        return size
+    }
+}
+
+// AXObserver requires a free C function — bounce into the registry singleton.
+private func axObserverCallback(
+    observer: AXObserver,
+    element: AXUIElement,
+    notificationName: CFString,
+    context: UnsafeMutableRawPointer?
+) {
+    guard let context else { return }
+    let registry = Unmanaged<WindowRegistry>.fromOpaque(context).takeUnretainedValue()
+    registry.handleNotification(
+        observer: observer,
+        element: element,
+        notificationName: notificationName
+    )
+}

@@ -17,7 +17,7 @@ struct Tile: Identifiable, Equatable {
 
 enum TileContent: Equatable {
     case app(AppTile)
-    case minimizedWindow(MinimizedWindowTile)
+    case minimizedWindow(AppWindow)
     case appFolder(AppFolderTile)
     case launchpad(LaunchpadTile)
     case widget(WidgetTile)
@@ -42,16 +42,6 @@ struct AppTile: Equatable {
         self.displayName = displayName
         self.displayedWidget = displayedWidget
     }
-}
-
-struct MinimizedWindowTile: Equatable {
-    let windowIdentifier: String
-    let windowNumber: Int?
-    let bundleIdentifier: String
-    let processIdentifier: pid_t
-    let appDisplayName: String
-    let windowTitle: String
-    let previewLookupIndex: Int
 }
 
 struct AppFolderTile: Equatable {

@@ -18,11 +18,6 @@ import CoreImage
 import CoreMedia
 import ScreenCaptureKit
 
-private let axWindowNumberAttribute = "AXWindowNumber" as CFString
-private let axCloseAction = "AXClose" as CFString
-private let axRaiseAction = "AXRaise" as CFString
-private let minimumSwitchableWindowSize = CGSize(width: 100, height: 100)
-
 struct RunningApp: Hashable, Identifiable {
     let bundleIdentifier: String
     let localizedName: String
@@ -34,27 +29,13 @@ struct RunningApp: Hashable, Identifiable {
     var id: String { bundleIdentifier }
 }
 
-struct AppWindow: Equatable, Identifiable {
-    let windowIdentifier: String
-    let windowNumber: Int?
-    let bundleIdentifier: String
-    let processIdentifier: pid_t
-    let appDisplayName: String
-    let windowTitle: String
-    let isMinimized: Bool
-    let previewLookupIndex: Int
-    let screenBounds: CGRect?
-
-    var id: String { windowIdentifier }
-}
-
 final class WorkspaceService: ObservableObject {
     static let shared = WorkspaceService()
 
     /// Ordered list: still-running apps keep their position across refreshes,
     /// newly-launched apps append. Terminated apps are removed in place.
     @Published private(set) var runningApps: [RunningApp] = []
-    @Published private(set) var minimizedWindows: [MinimizedWindowTile] = []
+    @Published private(set) var minimizedWindows: [AppWindow] = []
     @Published private(set) var minimizedWindowPreviews: [String: NSImage] = [:]
     @Published private(set) var appWindowPreviews: [String: NSImage] = [:]
 
@@ -64,20 +45,15 @@ final class WorkspaceService: ObservableObject {
 
     private var observers: [NSObjectProtocol] = []
     private var cancellables: Set<AnyCancellable> = []
-    private var lastMinimizedWindowsDebugSummary: String?
     private var attemptedMinimizedWindowPreviewIDs: Set<String> = []
     private var attemptedAppWindowPreviewIDs: Set<String> = []
-    private var prefetchedSwitchableWindows: [AppWindow] = []
-    private var lastPrefetchedSwitchableWindowsAt: Date?
-    private let switchableWindowPrefetchMaxAge: TimeInterval = 1.5
     private var liveFocusPreviewSession: LiveWindowPreviewSession?
 
     private init() {
         refresh()
         subscribe()
         subscribeToPermissions()
-        subscribeToWindowSwitcherPreferences()
-        subscribeToRefreshTimer()
+        subscribeToRegistry()
     }
 
     deinit {
@@ -95,7 +71,7 @@ final class WorkspaceService: ObservableObject {
         runningByBundleID[bundleIdentifier]?.isHidden == true
     }
 
-    func minimizedWindowPreview(for window: MinimizedWindowTile) -> NSImage? {
+    func minimizedWindowPreview(for window: AppWindow) -> NSImage? {
         minimizedWindowPreviews[window.windowIdentifier]
     }
 
@@ -195,122 +171,14 @@ final class WorkspaceService: ObservableObject {
     }
 
     func appWindows(bundleIdentifier: String) -> [AppWindow] {
-        guard PermissionsService.shared.accessibility == .granted,
-              let runningApp = runningByBundleID[bundleIdentifier] else {
-            return []
-        }
-
-        let applicationElement = AXUIElementCreateApplication(runningApp.processIdentifier)
-        return windowElements(applicationElement: applicationElement).enumerated().compactMap { index, windowElement in
-            appWindow(from: windowElement, runningApp: runningApp, fallbackIndex: index)
-        }
+        WindowRegistry.shared.windows(forBundleIdentifier: bundleIdentifier)
     }
 
     func switchableWindows(forceRefresh: Bool = false) -> [AppWindow] {
-        if !forceRefresh,
-           hasFreshSwitchableWindowPrefetch,
-           !prefetchedSwitchableWindows.isEmpty {
-            return prefetchedSwitchableWindows
-        }
-
-        return refreshSwitchableWindowSnapshot()
-    }
-
-    @discardableResult
-    private func refreshSwitchableWindowSnapshot() -> [AppWindow] {
-        let windows = querySwitchableWindows()
-        prefetchedSwitchableWindows = windows
-        lastPrefetchedSwitchableWindowsAt = Date()
-        refreshAppWindowPreviews(for: windows)
-        return windows
-    }
-
-    private func querySwitchableWindows() -> [AppWindow] {
-        guard PermissionsService.shared.accessibility == .granted else {
-            return []
-        }
-
-        let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] ?? []
-        let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
-        let runningAppsByProcessIdentifier = Dictionary(uniqueKeysWithValues: runningApps.map { ($0.processIdentifier, $0) })
-        var seenWindowIdentifiers: Set<String> = []
-        var cachedWindowsByBundleIdentifier: [String: [AppWindow]] = [:]
-        var result: [AppWindow] = []
-
-        for entry in windowList {
-            guard let ownerPID = entry[kCGWindowOwnerPID] as? pid_t,
-                  ownerPID != currentProcessIdentifier,
-                  (entry[kCGWindowLayer] as? Int) == 0,
-                  let bounds = entry[kCGWindowBounds] as? [String: CGFloat],
-                  (bounds["Width"] ?? 0) > 1,
-                  (bounds["Height"] ?? 0) > 1 else {
-                continue
-            }
-
-            guard let runningApp = runningAppsByProcessIdentifier[ownerPID] else {
-                continue
-            }
-
-            var bundleWindows = cachedWindowsByBundleIdentifier[runningApp.bundleIdentifier] ?? {
-                let windows = appWindows(bundleIdentifier: runningApp.bundleIdentifier)
-                cachedWindowsByBundleIdentifier[runningApp.bundleIdentifier] = windows
-                return windows
-            }()
-
-            let windowNumber = entry[kCGWindowNumber] as? Int
-            let windowName = (entry[kCGWindowName] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let screenBounds = CGRect(
-                x: bounds["X"] ?? 0,
-                y: bounds["Y"] ?? 0,
-                width: bounds["Width"] ?? 0,
-                height: bounds["Height"] ?? 0
-            )
-            guard let matchedWindowIndex = bundleWindows.firstIndex(where: {
-                if let windowNumber, $0.windowNumber == windowNumber {
-                    return true
-                }
-
-                return normalizedWindowTitle($0.windowTitle) == normalizedWindowTitle(windowName)
-            }) else {
-                continue
-            }
-            let matchedWindow = bundleWindows.remove(at: matchedWindowIndex)
-            cachedWindowsByBundleIdentifier[runningApp.bundleIdentifier] = bundleWindows
-
-            let visibleWindow = AppWindow(
-                windowIdentifier: matchedWindow.windowIdentifier,
-                windowNumber: windowNumber ?? matchedWindow.windowNumber,
-                bundleIdentifier: matchedWindow.bundleIdentifier,
-                processIdentifier: matchedWindow.processIdentifier,
-                appDisplayName: matchedWindow.appDisplayName,
-                windowTitle: matchedWindow.windowTitle,
-                isMinimized: matchedWindow.isMinimized,
-                previewLookupIndex: matchedWindow.previewLookupIndex,
-                screenBounds: screenBounds
-            )
-
-            if screenBounds.width < minimumSwitchableWindowSize.width
-                || screenBounds.height < minimumSwitchableWindowSize.height {
-                NSLog(
-                    "[Docky] Tiny switchable window candidate made it through app=%@ title=%@ id=%@ bounds=%@ windowNumber=%@",
-                    visibleWindow.bundleIdentifier,
-                    visibleWindow.windowTitle,
-                    visibleWindow.windowIdentifier,
-                    NSStringFromRect(screenBounds.integral),
-                    visibleWindow.windowNumber.map(String.init) ?? "nil"
-                )
-            }
-
-            guard !visibleWindow.isMinimized,
-                  !seenWindowIdentifiers.contains(visibleWindow.windowIdentifier) else {
-                continue
-            }
-
-            seenWindowIdentifiers.insert(visibleWindow.windowIdentifier)
-            result.append(visibleWindow)
-        }
-
-        return result
+        // Registry is event-driven; the cached snapshot is always fresh, so
+        // `forceRefresh` is now a no-op kept for source-compat.
+        _ = forceRefresh
+        return WindowRegistry.shared.visible
     }
 
     func appWindowPreview(for window: AppWindow) -> NSImage? {
@@ -373,28 +241,7 @@ final class WorkspaceService: ObservableObject {
 
     @discardableResult
     func focus(window: AppWindow) -> Bool {
-        guard PermissionsService.shared.accessibility == .granted else {
-            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "focus app windows")
-            return false
-        }
-
-        guard let (runningApp, windowElement) = appWindowTarget(for: window) else {
-            refreshMinimizedWindows()
-            return false
-        }
-
-        let restored = !window.isMinimized || AXUIElementSetAttributeValue(
-            windowElement,
-            kAXMinimizedAttribute as CFString,
-            kCFBooleanFalse
-        ) == .success
-
-        runningApp.unhide()
-        runningApp.activate(options: [.activateAllWindows])
-        let raised = AXUIElementPerformAction(windowElement, axRaiseAction) == .success
-
-        refreshMinimizedWindows()
-        return restored && raised
+        WindowRegistry.shared.focus(window)
     }
 
     func focusApplication(bundleIdentifier: String) {
@@ -403,48 +250,17 @@ final class WorkspaceService: ObservableObject {
         }
 
         runningApp.unhide()
-        runningApp.activate(options: [.activateAllWindows])
+        _ = runningApp.activate()
     }
 
     @discardableResult
     func minimize(window: AppWindow) -> Bool {
-        guard PermissionsService.shared.accessibility == .granted else {
-            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "minimize app windows")
-            return false
-        }
-
-        guard let (_, windowElement) = appWindowTarget(for: window) else {
-            refreshMinimizedWindows()
-            return false
-        }
-
-        let minimized = AXUIElementSetAttributeValue(
-            windowElement,
-            kAXMinimizedAttribute as CFString,
-            kCFBooleanTrue
-        ) == .success
-
-        refreshMinimizedWindows()
-        return minimized
+        WindowRegistry.shared.minimize(window)
     }
 
     @discardableResult
     func close(window: AppWindow) -> Bool {
-        guard PermissionsService.shared.accessibility == .granted else {
-            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "close app windows")
-            return false
-        }
-
-        guard let (_, windowElement) = appWindowTarget(for: window) else {
-            refreshMinimizedWindows()
-            return false
-        }
-
-        let closed = AXUIElementPerformAction(windowElement, axCloseAction) == .success
-            || closeWindowViaButton(windowElement)
-
-        refreshMinimizedWindows()
-        return closed
+        WindowRegistry.shared.close(window)
     }
 
     private func openApplication(at appURL: URL) {
@@ -470,49 +286,13 @@ final class WorkspaceService: ObservableObject {
     }
 
     @discardableResult
-    func restoreMinimizedWindow(_ window: MinimizedWindowTile) -> Bool {
-        guard PermissionsService.shared.accessibility == .granted else {
-            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "restore minimized windows")
-            return false
-        }
-
-        guard let (runningApp, windowElement) = minimizedWindowTarget(for: window) else {
-            refreshMinimizedWindows()
-            return false
-        }
-
-        let restored = AXUIElementSetAttributeValue(
-            windowElement,
-            kAXMinimizedAttribute as CFString,
-            kCFBooleanFalse
-        ) == .success
-
-        if restored {
-            runningApp.unhide()
-            runningApp.activate(options: [.activateAllWindows])
-        }
-
-        refreshMinimizedWindows()
-        return restored
+    func restoreMinimizedWindow(_ window: AppWindow) -> Bool {
+        WindowRegistry.shared.focus(window)
     }
 
     @discardableResult
-    func closeMinimizedWindow(_ window: MinimizedWindowTile) -> Bool {
-        guard PermissionsService.shared.accessibility == .granted else {
-            PermissionsService.shared.presentPermissionAlert(for: .accessibility, actionTitle: "close minimized windows")
-            return false
-        }
-
-        guard let (_, windowElement) = minimizedWindowTarget(for: window) else {
-            refreshMinimizedWindows()
-            return false
-        }
-
-        let closed = AXUIElementPerformAction(windowElement, axCloseAction) == .success
-            || closeWindowViaButton(windowElement)
-
-        refreshMinimizedWindows()
-        return closed
+    func closeMinimizedWindow(_ window: AppWindow) -> Bool {
+        WindowRegistry.shared.close(window)
     }
 
     func hide(bundleIdentifier: String) {
@@ -554,8 +334,7 @@ final class WorkspaceService: ObservableObject {
 
         runningByBundleID = newMap
         runningApps = ordered
-        refreshMinimizedWindows()
-        refreshSwitchableWindowPrefetchIfNeeded(force: true)
+        refreshWindowDerivedState()
     }
 
     /// Oldest → newest. Apps without a launchDate (rare; system apps launched
@@ -594,114 +373,38 @@ final class WorkspaceService: ObservableObject {
     }
 
     private func subscribeToPermissions() {
-        Publishers.CombineLatest(
-            PermissionsService.shared.$accessibility,
-            PermissionsService.shared.$screenCapture
-        )
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _ in
-                self?.refreshMinimizedWindows()
-                self?.refreshSwitchableWindowPrefetchIfNeeded(force: true)
-            }
-            .store(in: &cancellables)
-    }
-
-    private func subscribeToWindowSwitcherPreferences() {
-        DockyPreferences.shared.$enablesWindowSwitcher
+        PermissionsService.shared.$screenCapture
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshSwitchableWindowPrefetchIfNeeded(force: true)
+                self?.refreshWindowDerivedState()
             }
             .store(in: &cancellables)
     }
 
-    private func subscribeToRefreshTimer() {
-        Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
+    /// Mirrors the registry's window list into the published `minimizedWindows`
+    /// array and drives preview captures. Called whenever the registry's
+    /// snapshot, the running-apps list, or the screen-capture permission
+    /// changes.
+    private func subscribeToRegistry() {
+        WindowRegistry.shared.$windows
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                self?.refreshMinimizedWindows()
-                self?.refreshSwitchableWindowPrefetchIfNeeded()
+                self?.refreshWindowDerivedState()
             }
             .store(in: &cancellables)
     }
 
-    private var hasFreshSwitchableWindowPrefetch: Bool {
-        guard let lastPrefetchedSwitchableWindowsAt else {
-            return false
+    private func refreshWindowDerivedState() {
+        let registry = WindowRegistry.shared
+        let nextMinimized = registry.minimized
+        if nextMinimized != minimizedWindows {
+            minimizedWindows = nextMinimized
         }
-
-        return Date().timeIntervalSince(lastPrefetchedSwitchableWindowsAt) <= switchableWindowPrefetchMaxAge
+        refreshMinimizedWindowPreviews(for: nextMinimized)
+        refreshAppWindowPreviews(for: registry.visible)
     }
 
-    private func refreshSwitchableWindowPrefetchIfNeeded(force: Bool = false) {
-        guard DockyPreferences.shared.enablesWindowSwitcher,
-              PermissionsService.shared.accessibility == .granted else {
-            clearSwitchableWindowPrefetch()
-            return
-        }
-
-        guard force || !hasFreshSwitchableWindowPrefetch else {
-            return
-        }
-
-        _ = refreshSwitchableWindowSnapshot()
-    }
-
-    private func clearSwitchableWindowPrefetch() {
-        prefetchedSwitchableWindows = []
-        lastPrefetchedSwitchableWindowsAt = nil
-
-        if !appWindowPreviews.isEmpty {
-            appWindowPreviews = [:]
-        }
-
-        attemptedAppWindowPreviewIDs = []
-    }
-
-    private func refreshMinimizedWindows() {
-        guard PermissionsService.shared.accessibility == .granted else {
-            logMinimizedWindowsDebugSummary("Accessibility not granted")
-            if !minimizedWindows.isEmpty {
-                minimizedWindows = []
-            }
-            if !minimizedWindowPreviews.isEmpty {
-                minimizedWindowPreviews = [:]
-            }
-            attemptedMinimizedWindowPreviewIDs = []
-            return
-        }
-
-        var debugEntries: [String] = []
-        let currentWindows = runningApps.flatMap { runningApp in
-            minimizedWindowTiles(for: runningApp, debugEntries: &debugEntries)
-        }
-
-        if currentWindows.isEmpty {
-            logMinimizedWindowsDebugSummary(([
-                "No minimized windows detected",
-                "runningApps=\(runningApps.count)"
-            ] + debugEntries).joined(separator: " | "))
-        } else {
-            let titles = currentWindows.map { "\($0.appDisplayName):\($0.windowTitle)" }.joined(separator: ", ")
-            logMinimizedWindowsDebugSummary("Detected \(currentWindows.count) minimized window(s): \(titles)")
-        }
-
-        let currentByIdentifier = Dictionary(uniqueKeysWithValues: currentWindows.map { ($0.windowIdentifier, $0) })
-        let existingIdentifiers = Set(minimizedWindows.map(\.windowIdentifier))
-
-        var orderedWindows = minimizedWindows.compactMap { currentByIdentifier[$0.windowIdentifier] }
-        for window in currentWindows where !existingIdentifiers.contains(window.windowIdentifier) {
-            orderedWindows.append(window)
-        }
-
-        if orderedWindows != minimizedWindows {
-            minimizedWindows = orderedWindows
-        }
-
-        refreshMinimizedWindowPreviews(for: currentWindows)
-    }
-
-    private func refreshMinimizedWindowPreviews(for windows: [MinimizedWindowTile]) {
+    private func refreshMinimizedWindowPreviews(for windows: [AppWindow]) {
         guard PermissionsService.shared.screenCapture == .granted else {
             if !minimizedWindowPreviews.isEmpty {
                 minimizedWindowPreviews = [:]
@@ -736,192 +439,7 @@ final class WorkspaceService: ObservableObject {
         }
     }
 
-    private func minimizedWindowTiles(
-        for runningApp: RunningApp,
-        debugEntries: inout [String]
-    ) -> [MinimizedWindowTile] {
-        guard let application = NSRunningApplication.runningApplications(withBundleIdentifier: runningApp.bundleIdentifier).first else {
-            debugEntries.append("\(runningApp.localizedName): not running")
-            return []
-        }
-
-        let applicationElement = AXUIElementCreateApplication(application.processIdentifier)
-        let windows = minimizedWindowElements(applicationElement: applicationElement)
-        let minimizedWindows = windows.enumerated().compactMap { index, windowElement in
-            minimizedWindowTile(from: windowElement, runningApp: runningApp, fallbackIndex: index)
-        }
-
-        debugEntries.append("\(runningApp.localizedName): axWindows=\(windows.count), minimized=\(minimizedWindows.count)")
-        return minimizedWindows
-    }
-
-    private func minimizedWindowElements(applicationElement: AXUIElement) -> [AXUIElement] {
-        windowElements(applicationElement: applicationElement).filter { window in
-            boolAttribute(kAXMinimizedAttribute as CFString, of: window) == true
-        }
-    }
-
-    private func windowElements(applicationElement: AXUIElement) -> [AXUIElement] {
-        guard let windows = arrayAttribute(kAXWindowsAttribute as CFString, of: applicationElement) as? [AXUIElement] else {
-            return []
-        }
-
-        return windows.filter { window in
-            roleAttribute(of: window) == (kAXWindowRole as String)
-        }
-    }
-
-    private func appWindow(
-        from windowElement: AXUIElement,
-        runningApp: RunningApp,
-        fallbackIndex: Int
-    ) -> AppWindow? {
-        guard let windowSize = cgSizeAttribute(kAXSizeAttribute as CFString, of: windowElement),
-              windowSize.width >= minimumSwitchableWindowSize.width,
-              windowSize.height >= minimumSwitchableWindowSize.height else {
-            return nil
-        }
-
-        let title = stringAttribute(kAXTitleAttribute as CFString, of: windowElement)
-            ?? runningApp.localizedName
-        let windowNumber = intAttribute(axWindowNumberAttribute, of: windowElement)
-        let fallbackToken = title.isEmpty ? "window-\(fallbackIndex)" : "\(title):\(fallbackIndex)"
-
-        return AppWindow(
-            windowIdentifier: windowNumber.map { "\(runningApp.bundleIdentifier):\($0)" }
-                ?? "\(runningApp.bundleIdentifier):\(fallbackToken)",
-            windowNumber: windowNumber,
-            bundleIdentifier: runningApp.bundleIdentifier,
-            processIdentifier: runningApp.processIdentifier,
-            appDisplayName: runningApp.localizedName,
-            windowTitle: title.isEmpty ? runningApp.localizedName : title,
-            isMinimized: boolAttribute(kAXMinimizedAttribute as CFString, of: windowElement) == true,
-            previewLookupIndex: fallbackIndex,
-            screenBounds: nil
-        )
-    }
-
-    private func minimizedWindowTile(
-        from windowElement: AXUIElement,
-        runningApp: RunningApp,
-        fallbackIndex: Int
-    ) -> MinimizedWindowTile? {
-        let title = stringAttribute(kAXTitleAttribute as CFString, of: windowElement)
-            ?? runningApp.localizedName
-        let windowNumber = intAttribute(axWindowNumberAttribute, of: windowElement)
-        let fallbackToken = title.isEmpty ? "window-\(fallbackIndex)" : "\(title):\(fallbackIndex)"
-
-        return MinimizedWindowTile(
-            windowIdentifier: windowNumber.map { "\(runningApp.bundleIdentifier):\($0)" }
-                ?? "\(runningApp.bundleIdentifier):\(fallbackToken)",
-            windowNumber: windowNumber,
-            bundleIdentifier: runningApp.bundleIdentifier,
-            processIdentifier: runningApp.processIdentifier,
-            appDisplayName: runningApp.localizedName,
-            windowTitle: title.isEmpty ? runningApp.localizedName : title,
-            previewLookupIndex: fallbackIndex
-        )
-    }
-
-    private func minimizedWindowTarget(for window: MinimizedWindowTile) -> (NSRunningApplication, AXUIElement)? {
-        guard let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: window.bundleIdentifier).first else {
-            return nil
-        }
-        guard let runningAppSnapshot = runningByBundleID[window.bundleIdentifier] else {
-            return nil
-        }
-
-        let applicationElement = AXUIElementCreateApplication(runningApp.processIdentifier)
-        guard let windowElement = minimizedWindowElements(applicationElement: applicationElement)
-            .enumerated()
-            .first(where: { index, element in
-                minimizedWindowTile(from: element, runningApp: runningAppSnapshot, fallbackIndex: index)?.windowIdentifier == window.windowIdentifier
-            })?
-            .element else {
-            return nil
-        }
-
-        return (runningApp, windowElement)
-    }
-
-    private func appWindowTarget(for window: AppWindow) -> (NSRunningApplication, AXUIElement)? {
-        guard let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: window.bundleIdentifier).first else {
-            return nil
-        }
-        guard let runningAppSnapshot = runningByBundleID[window.bundleIdentifier] else {
-            return nil
-        }
-
-        let applicationElement = AXUIElementCreateApplication(runningApp.processIdentifier)
-        guard let windowElement = windowElements(applicationElement: applicationElement)
-            .enumerated()
-            .first(where: { index, element in
-                appWindow(from: element, runningApp: runningAppSnapshot, fallbackIndex: index)?.windowIdentifier == window.windowIdentifier
-            })?
-            .element else {
-            return nil
-        }
-
-        return (runningApp, windowElement)
-    }
-
-    private func closeWindowViaButton(_ windowElement: AXUIElement) -> Bool {
-        guard let closeButtonValue = valueAttribute(kAXCloseButtonAttribute as CFString, of: windowElement) else {
-            return false
-        }
-
-        let closeButton = unsafeBitCast(closeButtonValue, to: AXUIElement.self)
-
-        return AXUIElementPerformAction(closeButton, kAXPressAction as CFString) == .success
-    }
-
-    private func roleAttribute(of element: AXUIElement) -> String? {
-        stringAttribute(kAXRoleAttribute as CFString, of: element)
-    }
-
-    private func stringAttribute(_ attribute: CFString, of element: AXUIElement) -> String? {
-        valueAttribute(attribute, of: element) as? String
-    }
-
-    private func boolAttribute(_ attribute: CFString, of element: AXUIElement) -> Bool? {
-        (valueAttribute(attribute, of: element) as? NSNumber)?.boolValue
-    }
-
-    private func intAttribute(_ attribute: CFString, of element: AXUIElement) -> Int? {
-        (valueAttribute(attribute, of: element) as? NSNumber)?.intValue
-    }
-
-    private func cgSizeAttribute(_ attribute: CFString, of element: AXUIElement) -> CGSize? {
-        guard let value = valueAttribute(attribute, of: element) else {
-            return nil
-        }
-
-        let axValue = unsafeBitCast(value, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cgSize else {
-            return nil
-        }
-
-        var size = CGSize.zero
-        guard AXValueGetValue(axValue, .cgSize, &size) else {
-            return nil
-        }
-
-        return size
-    }
-
-    private func arrayAttribute(_ attribute: CFString, of element: AXUIElement) -> AnyObject? {
-        valueAttribute(attribute, of: element)
-    }
-
-    private func valueAttribute(_ attribute: CFString, of element: AXUIElement) -> AnyObject? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
-            return nil
-        }
-        return value
-    }
-
-    private func captureMinimizedWindowPreviewIfNeeded(for window: MinimizedWindowTile) {
+    private func captureMinimizedWindowPreviewIfNeeded(for window: AppWindow) {
         Task { [weak self] in
             guard let self,
                   let preview = await self.captureMinimizedWindowPreview(for: window) else {
@@ -1105,7 +623,7 @@ final class WorkspaceService: ObservableObject {
         }
     }
 
-    private func captureMinimizedWindowPreview(for window: MinimizedWindowTile) async -> NSImage? {
+    private func captureMinimizedWindowPreview(for window: AppWindow) async -> NSImage? {
         guard PermissionsService.shared.screenCapture == .granted else {
             return nil
         }
@@ -1148,47 +666,13 @@ final class WorkspaceService: ObservableObject {
         }
     }
 
-    private func matchingShareableWindow(for window: MinimizedWindowTile, in windows: [SCWindow]) -> SCWindow? {
-        if let windowNumber = window.windowNumber,
-           let exactMatch = windows.first(where: { Int($0.windowID) == windowNumber }) {
-            return exactMatch
-        }
-
-        let appWindows = windows.filter { shareableWindow in
-            guard let owningApplication = shareableWindow.owningApplication else {
-                return false
-            }
-
-            return owningApplication.processID == window.processIdentifier
-                || owningApplication.bundleIdentifier == window.bundleIdentifier
-        }
-
-        let titledWindows = appWindows.filter { shareableWindow in
-            normalizedWindowTitle(shareableWindow.title) == normalizedWindowTitle(window.windowTitle)
-        }
-
-        if titledWindows.indices.contains(window.previewLookupIndex) {
-            return titledWindows[window.previewLookupIndex]
-        }
-
-        if let titleMatch = titledWindows.first {
-            return titleMatch
-        }
-
-        if appWindows.indices.contains(window.previewLookupIndex) {
-            return appWindows[window.previewLookupIndex]
-        }
-
-        return appWindows.first
-    }
-
     private func matchingShareableWindow(for window: AppWindow, in windows: [SCWindow]) -> SCWindow? {
         if let windowNumber = window.windowNumber,
            let exactMatch = windows.first(where: { Int($0.windowID) == windowNumber }) {
             return exactMatch
         }
 
-        let appWindows = windows.filter { shareableWindow in
+        let candidates = windows.filter { shareableWindow in
             guard let owningApplication = shareableWindow.owningApplication else {
                 return false
             }
@@ -1197,23 +681,30 @@ final class WorkspaceService: ObservableObject {
                 || owningApplication.bundleIdentifier == window.bundleIdentifier
         }
 
-        let titledWindows = appWindows.filter { shareableWindow in
+        let titledCandidates = candidates.filter { shareableWindow in
             normalizedWindowTitle(shareableWindow.title) == normalizedWindowTitle(window.windowTitle)
         }
 
-        if titledWindows.indices.contains(window.previewLookupIndex) {
-            return titledWindows[window.previewLookupIndex]
+        // Fallback index: position of `window` within its app's window list.
+        // The registry maintains stable ordering, so this is consistent across
+        // calls within a process run.
+        let lookupIndex = WindowRegistry.shared
+            .windows(forBundleIdentifier: window.bundleIdentifier)
+            .firstIndex(where: { $0.id == window.id }) ?? 0
+
+        if titledCandidates.indices.contains(lookupIndex) {
+            return titledCandidates[lookupIndex]
         }
 
-        if let titleMatch = titledWindows.first {
+        if let titleMatch = titledCandidates.first {
             return titleMatch
         }
 
-        if appWindows.indices.contains(window.previewLookupIndex) {
-            return appWindows[window.previewLookupIndex]
+        if candidates.indices.contains(lookupIndex) {
+            return candidates[lookupIndex]
         }
 
-        return appWindows.first
+        return candidates.first
     }
 
     private func normalizedWindowTitle(_ title: String?) -> String {
@@ -1347,14 +838,6 @@ final class WorkspaceService: ObservableObject {
         return image
     }
 
-    private func logMinimizedWindowsDebugSummary(_ summary: String) {
-        guard summary != lastMinimizedWindowsDebugSummary else {
-            return
-        }
-
-        lastMinimizedWindowsDebugSummary = summary
-        NSLog("[Docky] Minimized windows: \(summary)")
-    }
 }
 
 private final class ShareableContentCache {

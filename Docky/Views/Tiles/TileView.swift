@@ -1259,7 +1259,7 @@ struct TileView: View {
     }
 
     private func minimizedWindowContextActions(
-        for window: MinimizedWindowTile,
+        for window: AppWindow,
         modifierFlags _: NSEvent.ModifierFlags
     ) -> [ContextAction] {
         let workspace = WorkspaceService.shared
