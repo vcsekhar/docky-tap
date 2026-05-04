@@ -165,9 +165,10 @@ final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
 
     override func draggingExited(_ sender: (any NSDraggingInfo)?) {
         DockDragService.shared.clear()
-        if DockEditModeService.shared.paletteDrag != nil {
-            DockEditModeService.shared.endPaletteDrag()
-        }
+        // Keep paletteDrag alive so re-entry works — the SwiftUI .onDrag-initiated
+        // drag is still in flight outside the window, and the palette item can't be
+        // recovered from the pasteboard (which only carries the variant ID).
+        DockEditModeService.shared.paletteDropDestination = nil
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
