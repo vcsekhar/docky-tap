@@ -141,17 +141,46 @@ final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         let location = convert(sender.draggingLocation, from: nil)
         let urls = readURLs(from: sender)
+        let pasteboardTypes = sender.draggingPasteboard.types?.map(\.rawValue) ?? []
         if let kind = DockDragService.resolvePreview(from: urls) {
+            NSLog(
+                "[Docky] drag entered: kind=%@ urls=%@ pasteboardTypes=%@",
+                Self.describe(kind: kind),
+                urls.map(\.path).joined(separator: ", "),
+                pasteboardTypes.joined(separator: ", ")
+            )
             DockDragService.shared.begin(kind: kind, at: location)
             updateSystemDragImageVisibility(in: sender)
             return .copy
         }
         if DockEditModeService.shared.paletteDrag != nil {
+            NSLog(
+                "[Docky] drag entered: kind=palette urls=%@ pasteboardTypes=%@",
+                urls.map(\.path).joined(separator: ", "),
+                pasteboardTypes.joined(separator: ", ")
+            )
             DockDragService.shared.cursorLocation = location
             updateSystemDragImageVisibility(in: sender)
             return .copy
         }
+        NSLog(
+            "[Docky] drag entered: kind=rejected urls=%@ pasteboardTypes=%@",
+            urls.map(\.path).joined(separator: ", "),
+            pasteboardTypes.joined(separator: ", ")
+        )
         return []
+    }
+
+    /// One-line description of a `DockDragService.Kind` for logging.
+    private static func describe(kind: DockDragService.Kind) -> String {
+        switch kind {
+        case .app(let url, let tile):
+            return "app(bundle=\(tile.bundleIdentifier), path=\(url.path))"
+        case .folder(let url, _):
+            return "folder(path=\(url.path))"
+        case .document(let urls):
+            return "document(paths=[\(urls.map(\.path).joined(separator: ", "))])"
+        }
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
@@ -181,10 +210,11 @@ final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
     /// Hide the system drag preview when our own insertion preview is active, so the
     /// user sees one drop indication instead of two competing ones. Restore originals
     /// when the active region is exited so the preview returns outside the dock.
+    /// Drag-onto-tile (open-with) intentionally keeps the system preview because
+    /// there's no insertion indicator competing for attention.
     private func updateSystemDragImageVisibility(in sender: any NSDraggingInfo) {
         let shouldHide =
-            DockDragService.shared.documentTargetTileID != nil
-            || DockDragService.shared.destinationIndex != nil
+            DockDragService.shared.destinationIndex != nil
             || DockEditModeService.shared.paletteDropDestination != nil
         if shouldHide {
             guard hiddenDragImageOriginals.isEmpty else { return }
@@ -212,13 +242,21 @@ final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         defer { restoreSystemDragImage() }
         if let kind = DockDragService.shared.kind {
+            let destinationIndex = DockDragService.shared.destinationIndex
+            let targetTileID = DockDragService.shared.documentTargetTileID
+            NSLog(
+                "[Docky] drag drop: kind=%@ destinationIndex=%@ documentTargetTileID=%@",
+                Self.describe(kind: kind),
+                destinationIndex.map(String.init) ?? "nil",
+                targetTileID ?? "nil"
+            )
             defer { DockDragService.shared.clear() }
             switch kind {
             case .app(_, let tile):
-                guard let index = DockDragService.shared.destinationIndex else { return false }
+                guard let index = destinationIndex else { return false }
                 return TileStore.shared.pinApp(bundleIdentifier: tile.bundleIdentifier, at: index)
             case .folder(let url, let tile):
-                if let targetTileID = DockDragService.shared.documentTargetTileID,
+                if let targetTileID,
                    let bundleIdentifier = TileStore.shared.tiles
                     .first(where: { $0.id == targetTileID })
                     .flatMap({ tile -> String? in
@@ -228,14 +266,14 @@ final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
                     WorkspaceService.shared.open(fileURLs: [url], withApplicationBundleIdentifier: bundleIdentifier)
                     return true
                 }
-                guard let index = DockDragService.shared.destinationIndex else { return false }
+                guard let index = destinationIndex else { return false }
                 TileStore.shared.insertTrailingItem(
                     .folder(url: url, displayName: tile.displayName),
                     at: index
                 )
                 return true
             case .document(let urls):
-                guard let targetTileID = DockDragService.shared.documentTargetTileID,
+                guard let targetTileID,
                       let bundleIdentifier = TileStore.shared.tiles
                         .first(where: { $0.id == targetTileID })
                         .flatMap({ tile -> String? in
