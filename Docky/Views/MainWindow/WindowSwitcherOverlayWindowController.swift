@@ -346,14 +346,13 @@ private struct WindowSwitcherCard: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxHeight: previewHeight)
+                    .frame(maxWidth: previewWidth, maxHeight: previewHeight)
             } else {
                 Color.black.opacity(0.01)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxHeight: previewHeight)
+                    .frame(maxWidth: previewWidth, maxHeight: previewHeight)
             }
         }
-        .frame(height: previewHeight)
+        .frame(width: previewWidth, height: previewHeight)
         .clipShape(RoundedRectangle(cornerRadius: innerPreviewCornerRadius/4, style: .continuous))
     }
 
