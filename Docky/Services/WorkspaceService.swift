@@ -49,6 +49,17 @@ final class WorkspaceService: ObservableObject {
     private var attemptedAppWindowPreviewIDs: Set<String> = []
     private var liveFocusPreviewSession: LiveWindowPreviewSession?
 
+    /// Backstop refresh interval for app-window thumbnails. Title-change
+    /// invalidation handles the common case (browsers, IDEs); this catches
+    /// content-only changes (editor scroll, in-page navigation) where the
+    /// title stays put but the cached thumb no longer represents the window.
+    private let appWindowPreviewTTL: TimeInterval = 120
+    private struct PreviewMetadata {
+        let capturedAt: Date
+        let capturedTitle: String
+    }
+    private var appWindowPreviewMetadata: [String: PreviewMetadata] = [:]
+
     private init() {
         refresh()
         subscribe()
@@ -462,16 +473,35 @@ final class WorkspaceService: ObservableObject {
             if !appWindowPreviews.isEmpty {
                 appWindowPreviews = [:]
             }
+            appWindowPreviewMetadata.removeAll()
             attemptedAppWindowPreviewIDs = []
             return
         }
 
         let activeWindowIdentifiers = Set(windows.map(\.windowIdentifier))
+        let windowsByIdentifier = Dictionary(uniqueKeysWithValues: windows.map { ($0.windowIdentifier, $0) })
         var updatedPreviews = appWindowPreviews
         var didChange = false
+        let now = Date()
 
         for windowIdentifier in updatedPreviews.keys where !activeWindowIdentifiers.contains(windowIdentifier) {
             updatedPreviews.removeValue(forKey: windowIdentifier)
+            appWindowPreviewMetadata.removeValue(forKey: windowIdentifier)
+            didChange = true
+        }
+
+        // Evict cached previews whose source window's title changed or whose
+        // age exceeded the TTL — the cached image is no longer representative.
+        let staleIdentifiers: [String] = appWindowPreviewMetadata.compactMap { id, metadata in
+            guard let window = windowsByIdentifier[id] else { return nil }
+            let titleChanged = metadata.capturedTitle != window.windowTitle
+            let expired = now.timeIntervalSince(metadata.capturedAt) > appWindowPreviewTTL
+            return (titleChanged || expired) ? id : nil
+        }
+        for identifier in staleIdentifiers {
+            updatedPreviews.removeValue(forKey: identifier)
+            appWindowPreviewMetadata.removeValue(forKey: identifier)
+            attemptedAppWindowPreviewIDs.remove(identifier)
             didChange = true
         }
 
@@ -520,6 +550,10 @@ final class WorkspaceService: ObservableObject {
                 var updatedPreviews = self.appWindowPreviews
                 updatedPreviews[window.windowIdentifier] = preview
                 self.appWindowPreviews = updatedPreviews
+                self.appWindowPreviewMetadata[window.windowIdentifier] = PreviewMetadata(
+                    capturedAt: Date(),
+                    capturedTitle: window.windowTitle
+                )
             }
         }
     }

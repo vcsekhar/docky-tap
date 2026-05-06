@@ -31,6 +31,17 @@ private let axWindowNumberAttribute = "AXWindowNumber" as CFString
 private let axCloseAction = "AXClose" as CFString
 private let minimumTrackedWindowSize = CGSize(width: 100, height: 100)
 
+/// System helpers whose AX windows would leak into the switcher / preview if
+/// we treated them like regular apps. Most are filtered by activation policy
+/// already; this is a defensive belt-and-braces layer for cases where an
+/// agent transiently flips to `.regular` (Notification Center has done this
+/// in the past).
+private let filteredBundleIdentifiers: Set<String> = [
+    "com.apple.notificationcenterui",
+    "com.apple.WindowManager",
+    "com.apple.dock",
+]
+
 /// Stable, opaque identity for an `AppWindow`. Backed by the
 /// `AXUIElement`'s CF identity — equal and hashable across the lifetime
 /// of the underlying window.
@@ -173,7 +184,9 @@ final class WindowRegistry: ObservableObject {
             return false
         }
 
-        let element = window.element
+        guard let element = liveElement(for: window) else {
+            return false
+        }
 
         let restored: Bool
         if window.isMinimized {
@@ -239,8 +252,12 @@ final class WindowRegistry: ObservableObject {
             return false
         }
 
+        guard let element = liveElement(for: window) else {
+            return false
+        }
+
         return AXUIElementSetAttributeValue(
-            window.element,
+            element,
             kAXMinimizedAttribute as CFString,
             kCFBooleanTrue
         ) == .success
@@ -253,7 +270,9 @@ final class WindowRegistry: ObservableObject {
             return false
         }
 
-        let element = window.element
+        guard let element = liveElement(for: window) else {
+            return false
+        }
         if AXUIElementPerformAction(element, axCloseAction) == .success {
             return true
         }
@@ -272,10 +291,36 @@ final class WindowRegistry: ObservableObject {
               let sizeValue = AXValueCreate(.cgSize, &size)
         else { return false }
 
-        let element = window.element
+        guard let element = liveElement(for: window) else { return false }
         let posResult = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, positionValue)
         let sizeResult = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sizeValue)
         return posResult == .success && sizeResult == .success
+    }
+
+    /// Returns a live `AXUIElement` for the window's logical identity, or nil
+    /// when the window is truly gone. Probes the cached element with a cheap
+    /// position read; if AX no longer answers, re-syncs the app and tries to
+    /// relocate the same window by `cgWindowID` (the only stable cross-element
+    /// identifier we keep). Skipping this lets stale element pointers silently
+    /// no-op `focus`/`minimize`/`close`/`resize`.
+    private func liveElement(for window: AppWindow) -> AXUIElement? {
+        if isElementResponsive(window.element) {
+            return window.element
+        }
+        syncWindows(for: window.processIdentifier)
+        guard let cgID = window.cgWindowID else { return nil }
+        return windows.first(where: {
+            $0.processIdentifier == window.processIdentifier && $0.cgWindowID == cgID
+        })?.element
+    }
+
+    private func isElementResponsive(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(
+            element,
+            kAXPositionAttribute as CFString,
+            &value
+        ) == .success
     }
 
     private func closeViaButton(_ windowElement: AXUIElement) -> Bool {
@@ -364,12 +409,22 @@ final class WindowRegistry: ObservableObject {
                 guard let pid = (notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier else { return }
                 self?.syncWindows(for: pid)
             },
+            // AX's view of windows can drift after a Space switch — windows on
+            // the now-inactive Space sometimes get hidden/shown inconsistently.
+            // Re-snapshot so MRU and visibility reflect the new Space.
+            center.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.rebuildSnapshot()
+            },
         ]
     }
 
     private func handleAppLaunched(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.activationPolicy == .regular else {
+              shouldTrack(app) else {
             return
         }
         installObserver(for: app)
@@ -388,7 +443,16 @@ final class WindowRegistry: ObservableObject {
     }
 
     private func currentRegularApps() -> [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        NSWorkspace.shared.runningApplications.filter(shouldTrack)
+    }
+
+    private func shouldTrack(_ app: NSRunningApplication) -> Bool {
+        guard app.activationPolicy == .regular else { return false }
+        if let bundleId = app.bundleIdentifier,
+           filteredBundleIdentifiers.contains(bundleId) {
+            return false
+        }
+        return true
     }
 
     // MARK: - Per-app AX observer

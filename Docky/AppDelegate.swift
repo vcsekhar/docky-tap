@@ -5,6 +5,7 @@
 //  Created by Jose Quintero on 17/04/26.
 //
 
+import ApplicationServices
 import Cocoa
 import Sentry
 
@@ -27,6 +28,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         configureSentry()
+
+        // Bound every AX call to 1s so a hung app can't stall the main run loop.
+        // Must precede any other AX work — applies process-wide.
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
 
         window?.orderOut(nil)
         NSApplication.shared.setActivationPolicy(.accessory)
