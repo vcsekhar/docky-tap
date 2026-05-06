@@ -930,6 +930,28 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// Hover dwell before the per-tile window preview slides up. Same
+    /// clamp pattern as the other delay prefs so the slider can never go
+    /// negative.
+    @Published var windowPreviewHoverDelay: TimeInterval {
+        didSet {
+            let clampedValue = max(0, windowPreviewHoverDelay)
+            guard clampedValue != oldValue else {
+                if windowPreviewHoverDelay != clampedValue {
+                    windowPreviewHoverDelay = clampedValue
+                }
+                return
+            }
+
+            if windowPreviewHoverDelay != clampedValue {
+                windowPreviewHoverDelay = clampedValue
+                return
+            }
+
+            defaults.set(clampedValue, forKey: Keys.windowPreviewHoverDelay)
+        }
+    }
+
     /// Whether Docky should hide the macOS system Dock while running.
     /// Turning this on snapshots the user's current Dock preferences and
     /// overwrites autohide/bounce behavior; turning it off restores the
@@ -1345,6 +1367,7 @@ final class DockyPreferences: ObservableObject {
         static let opensAtLogin = "docky.opensAtLogin"
         static let autohideWindowDelay = "docky.autohideWindowDelay"
         static let fullscreenRevealDelay = "docky.fullscreenRevealDelay"
+        static let windowPreviewHoverDelay = "docky.windowPreviewHoverDelay"
         static let maximizedWindowBehavior = "docky.maximizedWindowBehavior"
         static let hidesSystemDock = "docky.hidesSystemDock"
         static let overflowBehavior = "docky.overflowBehavior"
@@ -1395,6 +1418,7 @@ final class DockyPreferences: ObservableObject {
         static let opensAtLogin = true
         static let autohideWindowDelay: TimeInterval = 0.5
         static let fullscreenRevealDelay: TimeInterval = 0.5
+        static let windowPreviewHoverDelay: TimeInterval = 0.45
         static let maximizedWindowBehavior: MaximizedWindowBehavior = .ignore
         static let hidesSystemDock = true
         static let overflowBehavior: DockOverflowBehavior = .rescale
@@ -1446,6 +1470,7 @@ final class DockyPreferences: ObservableObject {
         let storedOpensAtLogin = defaults.object(forKey: Keys.opensAtLogin) as? Bool
         let storedAutohideWindowDelay = defaults.object(forKey: Keys.autohideWindowDelay) as? Double
         let storedFullscreenRevealDelay = defaults.object(forKey: Keys.fullscreenRevealDelay) as? Double
+        let storedWindowPreviewHoverDelay = defaults.object(forKey: Keys.windowPreviewHoverDelay) as? Double
         let storedMaximizedWindowBehavior = defaults.string(forKey: Keys.maximizedWindowBehavior)
         let storedHidesSystemDock = defaults.object(forKey: Keys.hidesSystemDock) as? Bool
         let storedOverflowBehavior = defaults.string(forKey: Keys.overflowBehavior)
@@ -1496,6 +1521,7 @@ final class DockyPreferences: ObservableObject {
         self.opensAtLogin = storedOpensAtLogin ?? LaunchAtLoginService.shared.isEnabled
         self.autohideWindowDelay = max(storedAutohideWindowDelay ?? DefaultValues.autohideWindowDelay, 0)
         self.fullscreenRevealDelay = max(storedFullscreenRevealDelay ?? DefaultValues.fullscreenRevealDelay, 0)
+        self.windowPreviewHoverDelay = max(storedWindowPreviewHoverDelay ?? DefaultValues.windowPreviewHoverDelay, 0)
         self.maximizedWindowBehavior = (storedMaximizedWindowBehavior.flatMap(MaximizedWindowBehavior.init(rawValue:)) ?? DefaultValues.maximizedWindowBehavior)
         self.hidesSystemDock = storedHidesSystemDock ?? DefaultValues.hidesSystemDock
         self.overflowBehavior = (storedOverflowBehavior.flatMap(DockOverflowBehavior.init(rawValue:)) ?? DefaultValues.overflowBehavior)
@@ -1575,6 +1601,7 @@ final class DockyPreferences: ObservableObject {
         opensAtLogin = DefaultValues.opensAtLogin
         autohideWindowDelay = DefaultValues.autohideWindowDelay
         fullscreenRevealDelay = DefaultValues.fullscreenRevealDelay
+        windowPreviewHoverDelay = DefaultValues.windowPreviewHoverDelay
         maximizedWindowBehavior = DefaultValues.maximizedWindowBehavior
         hidesSystemDock = DefaultValues.hidesSystemDock
         overflowBehavior = DefaultValues.overflowBehavior

@@ -37,6 +37,8 @@ struct TileView: View {
     @State private var folderSnapshot: FolderContentsSnapshot = .loaded([])
     @State private var lastFolderPopoverDismissedAt: TimeInterval = 0
     @State private var isPressed = false
+    @State private var windowPreviewDelayTask: Task<Void, Never>?
+    @ObservedObject private var windowPreview = WindowPreviewWindowController.shared
 
     private static let finderBundleIdentifier = "com.apple.finder"
     private static let folderPopoverRetapGuardInterval: TimeInterval = 0.25
@@ -445,6 +447,8 @@ struct TileView: View {
             .onDisappear {
                 widgetExpansionTask?.cancel()
                 widgetExpansionTask = nil
+                windowPreviewDelayTask?.cancel()
+                windowPreviewDelayTask = nil
                 isHovering = false
                 WidgetExpansionWindowController.shared.dismiss(sourceTileID: tile.id)
                 isTooltipPresented = false
@@ -453,6 +457,7 @@ struct TileView: View {
                 isAppFolderPopoverPresented = false
                 isAppFolderListMenuPresented = false
                 isContextMenuPresented = false
+                WindowPreviewWindowController.shared.dismiss(sourceTileID: tile.id)
             }
             .onChange(of: isFolderPopoverPresented) { _, isPresented in
                 updateTooltipPresentation()
@@ -470,6 +475,9 @@ struct TileView: View {
                 widgetExpansionTask?.cancel()
                 widgetExpansionTask = nil
                 WidgetExpansionWindowController.shared.dismiss(sourceTileID: tile.id)
+            }
+            .onChange(of: windowPreview.activeSourceTileID) { _, _ in
+                updateTooltipPresentation()
             }
             .onChange(of: dockDrag.springLoadedTileID) { _, springLoaded in
                 guard springLoaded == tile.id else { return }
@@ -915,6 +923,71 @@ struct TileView: View {
     private func applyHoverState(_ isHovering: Bool) {
         self.isHovering = isHovering
         updateTooltipPresentation()
+        updateWindowPreviewPresentation(isHovering: isHovering)
+    }
+
+    /// Hover-dwell trigger for the per-tile window preview window. Mirrors
+    /// the widget expansion contract: present after a delay on hover-in,
+    /// requestDismiss on hover-out (with a short grace so the cursor can
+    /// transition into the preview window without dropping it). Both `.app`
+    /// and `.appFolder` tiles participate — the app-folder case aggregates
+    /// windows from every contained app.
+    private func updateWindowPreviewPresentation(isHovering: Bool) {
+        windowPreviewDelayTask?.cancel()
+        windowPreviewDelayTask = nil
+
+        let bundleIDs = windowPreviewBundleIdentifiers
+        guard !bundleIDs.isEmpty,
+              !editMode.isActive,
+              !isContextMenuPresented,
+              !isAppFolderPopoverPresented,
+              !isAppFolderListMenuPresented
+        else {
+            WindowPreviewWindowController.shared.requestDismiss(sourceTileID: tile.id)
+            return
+        }
+
+        if !isHovering {
+            WindowPreviewWindowController.shared.requestDismiss(sourceTileID: tile.id)
+            return
+        }
+
+        let workspace = WorkspaceService.shared
+        let hasAnyWindow = bundleIDs.contains { id in
+            !workspace.appWindows(bundleIdentifier: id).isEmpty
+        }
+        guard hasAnyWindow else {
+            WindowPreviewWindowController.shared.requestDismiss(sourceTileID: tile.id)
+            return
+        }
+
+        let delay = max(0, preferences.windowPreviewHoverDelay)
+        windowPreviewDelayTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, self.isHovering else { return }
+            WindowPreviewWindowController.shared.present(
+                forBundleIdentifiers: bundleIDs,
+                sourceTileID: tile.id,
+                sourceFrame: globalTileFrame,
+                preferredEdge: inwardPopoverEdge
+            )
+        }
+    }
+
+    /// Bundle identifiers whose windows should be merged into the hover
+    /// preview for this tile. `.app` returns its single bundle; `.appFolder`
+    /// returns every contained app's bundle.
+    private var windowPreviewBundleIdentifiers: [String] {
+        switch tile.content {
+        case .app(let app) where app.displayedWidget == nil:
+            return app.bundleIdentifier.isEmpty ? [] : [app.bundleIdentifier]
+        case .appFolder(let folder):
+            return folder.apps
+                .map(\.bundleIdentifier)
+                .filter { !$0.isEmpty }
+        default:
+            return []
+        }
     }
 
     private var expandableWidget: WidgetTile? {
@@ -990,6 +1063,7 @@ struct TileView: View {
             && !isAppFolderPopoverPresented
             && !isAppFolderListMenuPresented
             && !isContextMenuPresented
+            && windowPreview.activeSourceTileID != tile.id
 
         guard shouldShow else {
             isTooltipPresented = false
@@ -1005,6 +1079,11 @@ struct TileView: View {
             openProductSettings()
             return
         }
+
+        // Tap-to-act always supersedes the hover preview.
+        windowPreviewDelayTask?.cancel()
+        windowPreviewDelayTask = nil
+        WindowPreviewWindowController.shared.dismiss(sourceTileID: tile.id)
 
         switch tile.content {
         case .app(let app):

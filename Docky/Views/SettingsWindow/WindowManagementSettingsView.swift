@@ -139,6 +139,34 @@ struct WindowManagementSettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
+
+            Section("Window Preview") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Hover Delay")
+                            .font(.headline)
+
+                        Spacer()
+
+                        HStack {
+                            Slider(value: $preferences.windowPreviewHoverDelay, in: 0...2, step: 0.05) {
+                                Text("Hover Delay")
+                            }
+                            .labelsHidden()
+
+                            Text(String(format: "%.2fs", preferences.windowPreviewHoverDelay))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 56, alignment: .trailing)
+                                .monospacedDigit()
+                        }
+                    }
+
+                    Text("How long to wait before the per-tile window preview appears when hovering an app or app folder.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+            }
         }
         .formStyle(.grouped)
     }
