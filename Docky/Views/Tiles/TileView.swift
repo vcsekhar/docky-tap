@@ -426,7 +426,7 @@ struct TileView: View {
             .overlay(alignment: runningIndicatorAlignment) {
                 runningIndicator
                     .padding(runningIndicatorEdge, runningIndicatorInset)
-                    .offset(y: -max((layout.scaled(preferences.tileVerticalPadding) / 2), 2))
+                    .offset(x: runningIndicatorOffsetVector.width, y: runningIndicatorOffsetVector.height)
             }
             .overlay {
                 if isLockedProductPlacement {
@@ -699,7 +699,24 @@ struct TileView: View {
     }
 
     private var runningIndicatorScale: CGFloat {
-        max(0.5, min(1, effectiveTileSize / 48))
+        let baseScale = max(0.5, min(1, effectiveTileSize / 48))
+        return baseScale * max(0.25, preferences.activeIndicatorScale)
+    }
+
+    private var runningIndicatorOffsetVector: CGSize {
+        let baseInward = max((layout.scaled(preferences.tileVerticalPadding) / 2), 2)
+        let totalInward = baseInward + preferences.activeIndicatorOffset
+
+        switch position {
+        case .top:
+            return CGSize(width: 0, height: totalInward)
+        case .bottom:
+            return CGSize(width: 0, height: -totalInward)
+        case .left:
+            return CGSize(width: totalInward, height: 0)
+        case .right:
+            return CGSize(width: -totalInward, height: 0)
+        }
     }
 
     private var runningIndicatorImage: NSImage? {

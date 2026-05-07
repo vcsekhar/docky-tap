@@ -138,6 +138,20 @@ final class TileStore: ObservableObject {
                 self?.rebuildTiles()
             }
             .store(in: &cancellables)
+        preferences.$enablesShelveMode
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuildTiles()
+            }
+            .store(in: &cancellables)
+        preferences.$hidesRecentApps
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.rebuildTiles()
+            }
+            .store(in: &cancellables)
         mediaPlayback.$statesByBundleIdentifier
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -2054,9 +2068,9 @@ final class TileStore: ObservableObject {
             pinnedBundleIDs: pinnedBundleIDs
         )
 
-        let runningTiles = preferences.showsRunningApps
-            ? displayedRunning.map(Self.tile(for:))
-            : []
+        let shelveMode = preferences.enablesShelveMode
+        let recentsHidden = preferences.hidesRecentApps || !preferences.showsRunningApps
+        let runningTiles = recentsHidden ? [] : displayedRunning.map(Self.tile(for:))
         let minimizedWindowTiles = preferences.showsMinimizedWindows
             ? WorkspaceService.shared.minimizedWindows.map(Self.tile(for:))
             : []
@@ -2064,15 +2078,22 @@ final class TileStore: ObservableObject {
             ? pinnedWithoutFinder
             : pinnedWithoutFinder + runningTiles
 
-        var result: [Tile] = tilesWithWidgets(appendedTo: [Self.finderTile()])
+        let leadingFinder: [Tile] = shelveMode ? [] : [Self.finderTile()]
+        var result: [Tile] = tilesWithWidgets(appendedTo: leadingFinder)
         result.append(contentsOf: tilesWithWidgets(appendedTo: mergedPinnedTiles))
         if preferences.showsActivePinnedSeparator, !runningTiles.isEmpty {
             result.append(Tile(id: "divider:running", content: .divider))
             result.append(contentsOf: tilesWithWidgets(appendedTo: runningTiles))
         }
         result.append(Tile(id: "divider:trailing", content: .divider))
-        result.append(contentsOf: trailingTiles(withInsertedMinimizedWindows: minimizedWindowTiles))
+        let trailing = trailingTiles(withInsertedMinimizedWindows: minimizedWindowTiles)
+        result.append(contentsOf: shelveMode ? trailing.filter { !Self.isTrash($0) } : trailing)
         tiles = result.map(applyingAppWidgetDisplay(to:))
+    }
+
+    private static func isTrash(_ tile: Tile) -> Bool {
+        if case .trash = tile.content { return true }
+        return false
     }
 
     private func trailingTiles(withInsertedMinimizedWindows minimizedWindowTiles: [Tile]) -> [Tile] {

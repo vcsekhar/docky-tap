@@ -11,6 +11,7 @@ struct FolderTileView: View {
     let isOpen: Bool
     @ObservedObject private var permissions = PermissionsService.shared
     @ObservedObject private var folderAccess = FolderAccessService.shared
+    @ObservedObject private var preferences = DockyPreferences.shared
     @State private var preview: [URL] = []
 
     var body: some View {
@@ -53,10 +54,18 @@ struct FolderTileView: View {
     }
 
     private var folderIcon: some View {
-        Image(nsImage: IconCacheService.shared.previewIcon(forFileURL: tile.url))
+        Image(nsImage: resolvedFolderIconImage)
             .resizable()
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
+    }
+
+    private var resolvedFolderIconImage: NSImage {
+        if let overrideURL = preferences.effectiveFolderIconOverrideURL(forPath: tile.url.path),
+           let overrideImage = IconCacheService.shared.image(forImageFileURL: overrideURL) {
+            return overrideImage
+        }
+        return IconCacheService.shared.previewIcon(forFileURL: tile.url)
     }
 
     @ViewBuilder

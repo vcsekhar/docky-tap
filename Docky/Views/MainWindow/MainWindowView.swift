@@ -69,9 +69,7 @@ struct MainWindowView: View {
             .background {
                 if let backgroundImage = resolvedBackgroundImage {
                     GeometryReader { proxy in
-                        Image(nsImage: backgroundImage)
-                            .resizable()
-                            .scaledToFill()
+                        backgroundImageContent(image: backgroundImage)
                             .frame(
                                 width: rotated ? proxy.size.height : proxy.size.width,
                                 height: rotated ? proxy.size.width : proxy.size.height
@@ -85,6 +83,23 @@ struct MainWindowView: View {
                 }
             }
             .clipped()
+    }
+
+    @ViewBuilder
+    private func backgroundImageContent(image: NSImage) -> some View {
+        switch preferences.windowBackgroundImageMode {
+        case .fill:
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+        case .sprite:
+            let cap = max(1, min(image.size.width / 3, image.size.height))
+            Image(nsImage: image)
+                .resizable(
+                    capInsets: EdgeInsets(top: 0, leading: cap, bottom: 0, trailing: cap),
+                    resizingMode: .stretch
+                )
+        }
     }
 
     private func backgroundImageRotationDegrees(for position: ResolvedDockWindowPosition) -> Double {

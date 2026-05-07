@@ -275,15 +275,27 @@ struct TileContainerView: View {
     }
 
     private var displayTiles: [Tile] {
-        guard let finderTile = store.tiles.first else {
+        guard let firstTile = store.tiles.first else {
             return store.tiles
         }
 
-        var result: [Tile] = [finderTile]
+        // Shelve mode drops the leading Finder tile, so the first store
+        // tile may be a regular pinned app — which is also surfaced via
+        // `previewPinnedTiles`. Only pin the first tile to the front when
+        // it actually is Finder; otherwise let the normal pinned-section
+        // path render it once.
+        let leadsWithFinder = firstTile.id == "pinned:com.apple.finder"
+        var result: [Tile] = []
+        if leadsWithFinder {
+            result.append(firstTile)
+        }
         result.append(contentsOf: previewPinnedTiles)
         var appendedTrailingSection = false
 
-        for tile in store.tiles.dropFirst() {
+        let remainingTiles: ArraySlice<Tile> = leadsWithFinder
+            ? store.tiles.dropFirst()
+            : store.tiles[...]
+        for tile in remainingTiles {
             if appendedTrailingSection {
                 continue
             }

@@ -111,12 +111,16 @@ struct AppFolderTileView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var showsBackdrop: Bool {
+        openedAppCount > 0 && preferences.showsGroupedOpenedAppsBackdrop
+    }
+
     @ViewBuilder
     private var content: some View {
         GeometryReader { geo in
             displayContent(in: geo.size)
                 .background(
-                    Color.primary.opacity(openedAppCount > 0 ? 0.2 : 0)
+                    Color.primary.opacity(showsBackdrop ? 0.2 : 0)
                         .clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
                         .padding(.top, position.isVertical ? 0 : -4)
                         .padding(.bottom, position.isVertical ? 0 : -3)

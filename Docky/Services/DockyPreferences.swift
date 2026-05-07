@@ -450,6 +450,20 @@ enum DockWindowAxisSizing: String, CaseIterable, Identifiable {
     }
 }
 
+enum DockBackgroundImageMode: String, CaseIterable, Identifiable {
+    case fill
+    case sprite
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fill: "Fill"
+        case .sprite: "Sprite"
+        }
+    }
+}
+
 enum MaximizedWindowBehavior: String, CaseIterable, Identifiable {
     case ignore
     case hideDocky
@@ -600,6 +614,21 @@ struct TrashIconOverride: Codable, Equatable, Identifiable {
     let iconPath: String
 
     var id: String { state.rawValue }
+
+    var effectiveIconURL: URL? {
+        guard !iconPath.isEmpty, FileManager.default.fileExists(atPath: iconPath) else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: iconPath)
+    }
+}
+
+struct FolderIconOverride: Codable, Equatable, Identifiable {
+    let folderPath: String
+    let iconPath: String
+
+    var id: String { folderPath }
 
     var effectiveIconURL: URL? {
         guard !iconPath.isEmpty, FileManager.default.fileExists(atPath: iconPath) else {
@@ -865,6 +894,16 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// How the background image is rendered inside the chrome. `fill` scales
+    /// to cover the chrome while `sprite` clips the leading/trailing thirds
+    /// and stretches the middle along the dock's axis.
+    @Published var windowBackgroundImageMode: DockBackgroundImageMode {
+        didSet {
+            guard windowBackgroundImageMode != oldValue else { return }
+            defaults.set(windowBackgroundImageMode.rawValue, forKey: Keys.windowBackgroundImageMode)
+        }
+    }
+
     /// Edge Docky anchors itself to. `system` mirrors the macOS Dock.
     @Published var windowPosition: DockWindowPosition {
         didSet {
@@ -1095,6 +1134,27 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// Shelve mode: hides Finder and Trash tiles so the dock reads as a
+    /// pure shelf of pinned apps + widgets. Independent of recent-app
+    /// suppression (`hidesRecentApps`).
+    @Published var enablesShelveMode: Bool {
+        didSet {
+            guard enablesShelveMode != oldValue else { return }
+            defaults.set(enablesShelveMode, forKey: Keys.enablesShelveMode)
+        }
+    }
+
+    /// When true, recent / unpinned running apps are hidden from the dock.
+    /// Equivalent to `showsRunningApps == false`; either being set hides
+    /// them, so the user can disable recents from the dedicated toggle
+    /// without flipping the broader "Show Running Apps" preference.
+    @Published var hidesRecentApps: Bool {
+        didSet {
+            guard hidesRecentApps != oldValue else { return }
+            defaults.set(hidesRecentApps, forKey: Keys.hidesRecentApps)
+        }
+    }
+
     /// Shape used for the active app indicator.
     @Published var activeIndicatorShape: DockTileIndicatorShape {
         didSet {
@@ -1171,6 +1231,49 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// Extra inward offset applied to the active app indicator, in points.
+    /// Positive values pull the indicator further from the screen edge.
+    @Published var activeIndicatorOffset: CGFloat {
+        didSet {
+            guard activeIndicatorOffset != oldValue else { return }
+            defaults.set(activeIndicatorOffset, forKey: Keys.activeIndicatorOffset)
+        }
+    }
+
+    /// Scale multiplier applied to the active app indicator's rendered size.
+    @Published var activeIndicatorScale: CGFloat {
+        didSet {
+            guard activeIndicatorScale != oldValue else { return }
+            defaults.set(activeIndicatorScale, forKey: Keys.activeIndicatorScale)
+        }
+    }
+
+    /// Fraction of the tile size used to inset the divider along its short axis.
+    /// 0 produces an edge-to-edge divider; 0.25 matches the legacy default.
+    @Published var dividerPaddingFraction: CGFloat {
+        didSet {
+            guard dividerPaddingFraction != oldValue else { return }
+            defaults.set(dividerPaddingFraction, forKey: Keys.dividerPaddingFraction)
+        }
+    }
+
+    /// Scale multiplier applied to custom divider images.
+    @Published var dividerImageScale: CGFloat {
+        didSet {
+            guard dividerImageScale != oldValue else { return }
+            defaults.set(dividerImageScale, forKey: Keys.dividerImageScale)
+        }
+    }
+
+    /// Offset applied to dividers along the dock's main axis, in points.
+    /// Positive shifts toward the dock's trailing direction.
+    @Published var dividerOffset: CGFloat {
+        didSet {
+            guard dividerOffset != oldValue else { return }
+            defaults.set(dividerOffset, forKey: Keys.dividerOffset)
+        }
+    }
+
     /// Optional per-app icon overrides used by app tiles.
     @Published var appIconOverrides: [AppIconOverride] {
         didSet {
@@ -1184,6 +1287,14 @@ final class DockyPreferences: ObservableObject {
         didSet {
             guard trashIconOverrides != oldValue else { return }
             persistTrashIconOverrides(trashIconOverrides)
+        }
+    }
+
+    /// Optional per-folder icon overrides used by folder tiles, keyed by path.
+    @Published var folderIconOverrides: [FolderIconOverride] {
+        didSet {
+            guard folderIconOverrides != oldValue else { return }
+            persistFolderIconOverrides(folderIconOverrides)
         }
     }
 
@@ -1212,6 +1323,16 @@ final class DockyPreferences: ObservableObject {
         didSet {
             guard showsGroupedOpenedAppsInDock != oldValue else { return }
             defaults.set(showsGroupedOpenedAppsInDock, forKey: Keys.showsGroupedOpenedAppsInDock)
+        }
+    }
+
+    /// Whether the rounded backdrop should be drawn around the folder tile and
+    /// its grouped opened apps. Independent of `showsGroupedOpenedAppsInDock`
+    /// so users can keep the grouping without the visual halo.
+    @Published var showsGroupedOpenedAppsBackdrop: Bool {
+        didSet {
+            guard showsGroupedOpenedAppsBackdrop != oldValue else { return }
+            defaults.set(showsGroupedOpenedAppsBackdrop, forKey: Keys.showsGroupedOpenedAppsBackdrop)
         }
     }
 
@@ -1542,6 +1663,41 @@ final class DockyPreferences: ObservableObject {
         trashIconOverrides.removeAll { $0.state == state }
     }
 
+    func folderIconOverride(forPath path: String) -> FolderIconOverride? {
+        guard ProductService.shared.isUnlocked(.customAppIcons) else {
+            return nil
+        }
+
+        return folderIconOverrides.first { $0.folderPath == path }
+    }
+
+    func effectiveFolderIconOverrideURL(forPath path: String) -> URL? {
+        folderIconOverride(forPath: path)?.effectiveIconURL
+    }
+
+    func setFolderIconOverride(folderPath: String, iconPath: String) {
+        guard ProductService.shared.isUnlocked(.customAppIcons) else {
+            return
+        }
+
+        guard !folderPath.isEmpty, !iconPath.isEmpty else {
+            return
+        }
+
+        var overridesByPath = DataIntegrityReporter.makeDictionary(
+            folderIconOverrides.map { ($0.folderPath, $0) },
+            site: "DockyPreferences.folderIconOverrides"
+        )
+        overridesByPath[folderPath] = FolderIconOverride(folderPath: folderPath, iconPath: iconPath)
+        folderIconOverrides = overridesByPath.values.sorted {
+            $0.folderPath.localizedCaseInsensitiveCompare($1.folderPath) == .orderedAscending
+        }
+    }
+
+    func removeFolderIconOverride(folderPath: String) {
+        folderIconOverrides.removeAll { $0.folderPath == folderPath }
+    }
+
     func isAppHiddenInDocky(bundleIdentifier: String) -> Bool {
         hiddenAppBundleIdentifiers.contains(bundleIdentifier)
     }
@@ -1577,6 +1733,7 @@ final class DockyPreferences: ObservableObject {
         static let windowTintOpacity = "docky.windowTintOpacity"
         static let disablesGlassLook = "docky.disablesGlassLook"
         static let windowBackgroundImagePath = "docky.windowBackgroundImagePath"
+        static let windowBackgroundImageMode = "docky.windowBackgroundImageMode"
         static let windowPosition = "docky.windowPosition"
         static let windowDisplayTarget = "docky.windowDisplayTarget"
         static let windowSpaceBehavior = "docky.windowSpaceBehavior"
@@ -1596,6 +1753,8 @@ final class DockyPreferences: ObservableObject {
         static let showsActivePinnedSeparator = "docky.showsActivePinnedSeparator"
         static let showsRunningApps = "docky.showsRunningApps"
         static let showsMinimizedWindows = "docky.showsMinimizedWindows"
+        static let enablesShelveMode = "docky.enablesShelveMode"
+        static let hidesRecentApps = "docky.hidesRecentApps"
         static let appTileFrontmostClickBehavior = "docky.appTileFrontmostClickBehavior"
         static let activeIndicatorShape = "docky.activeIndicatorShape"
         static let activeIndicatorImagePath = "docky.activeIndicatorImagePath"
@@ -1604,10 +1763,17 @@ final class DockyPreferences: ObservableObject {
         static let leftDividerImagePath = "docky.leftDividerImagePath"
         static let rightDividerImagePath = "docky.rightDividerImagePath"
         static let mirrorsLeftDividerOnRight = "docky.mirrorsLeftDividerOnRight"
+        static let activeIndicatorOffset = "docky.activeIndicatorOffset"
+        static let activeIndicatorScale = "docky.activeIndicatorScale"
+        static let dividerPaddingFraction = "docky.dividerPaddingFraction"
+        static let dividerImageScale = "docky.dividerImageScale"
+        static let dividerOffset = "docky.dividerOffset"
         static let appIconOverrides = "docky.appIconOverrides"
         static let trashIconOverrides = "docky.trashIconOverrides"
+        static let folderIconOverrides = "docky.folderIconOverrides"
         static let hiddenAppBundleIdentifiers = "docky.hiddenAppBundleIdentifiers"
         static let showsGroupedOpenedAppsInDock = "docky.showsGroupedOpenedAppsInDock"
+        static let showsGroupedOpenedAppsBackdrop = "docky.showsGroupedOpenedAppsBackdrop"
         static let enablesLaunchpadOverlay = "docky.enablesLaunchpadOverlay"
         static let launchpadOverlayTransparency = "docky.launchpadOverlayTransparency"
         static let launchpadGridColumnCount = "docky.launchpadGridColumnCount"
@@ -1636,6 +1802,7 @@ final class DockyPreferences: ObservableObject {
         static let windowTintOpacity: CGFloat = 0.22
         static let disablesGlassLook = false
         static let windowBackgroundImagePath: String? = nil
+        static let windowBackgroundImageMode: DockBackgroundImageMode = .fill
         static let windowPosition: DockWindowPosition = .system
         static let windowDisplayTarget: DockWindowDisplayTarget = .primaryDisplay
         static let windowSpaceBehavior: DockWindowSpaceBehavior = .allSpaces
@@ -1655,6 +1822,8 @@ final class DockyPreferences: ObservableObject {
         static let showsActivePinnedSeparator = true
         static let showsRunningApps = true
         static let showsMinimizedWindows = true
+        static let enablesShelveMode = false
+        static let hidesRecentApps = false
         static let appTileFrontmostClickBehavior: AppTileFrontmostClickBehavior = .none
         static let activeIndicatorShape: DockTileIndicatorShape = .dot
         static let activeIndicatorImagePath: String? = nil
@@ -1663,10 +1832,17 @@ final class DockyPreferences: ObservableObject {
         static let leftDividerImagePath: String? = nil
         static let rightDividerImagePath: String? = nil
         static let mirrorsLeftDividerOnRight = false
+        static let activeIndicatorOffset: CGFloat = 0
+        static let activeIndicatorScale: CGFloat = 1
+        static let dividerPaddingFraction: CGFloat = 0.25
+        static let dividerImageScale: CGFloat = 1
+        static let dividerOffset: CGFloat = 0
         static let appIconOverrides: [AppIconOverride] = []
         static let trashIconOverrides: [TrashIconOverride] = []
+        static let folderIconOverrides: [FolderIconOverride] = []
         static let hiddenAppBundleIdentifiers: [String] = []
         static let showsGroupedOpenedAppsInDock = true
+        static let showsGroupedOpenedAppsBackdrop = true
         static let enablesLaunchpadOverlay = true
         static let launchpadOverlayTransparency: CGFloat = 0.4
         static let launchpadGridColumnCount = 7
@@ -1696,6 +1872,7 @@ final class DockyPreferences: ObservableObject {
         let storedWindowTintOpacity = defaults.object(forKey: Keys.windowTintOpacity) as? Double
         let storedDisablesGlassLook = defaults.object(forKey: Keys.disablesGlassLook) as? Bool
         let storedWindowBackgroundImagePath = defaults.string(forKey: Keys.windowBackgroundImagePath)
+        let storedWindowBackgroundImageMode = defaults.string(forKey: Keys.windowBackgroundImageMode)
         let storedWindowPosition = defaults.string(forKey: Keys.windowPosition)
         let storedWindowDisplayTarget = defaults.string(forKey: Keys.windowDisplayTarget)
         let storedWindowSpaceBehavior = defaults.string(forKey: Keys.windowSpaceBehavior)
@@ -1715,6 +1892,8 @@ final class DockyPreferences: ObservableObject {
         let storedShowsActivePinnedSeparator = defaults.object(forKey: Keys.showsActivePinnedSeparator) as? Bool
         let storedShowsRunningApps = defaults.object(forKey: Keys.showsRunningApps) as? Bool
         let storedShowsMinimizedWindows = defaults.object(forKey: Keys.showsMinimizedWindows) as? Bool
+        let storedEnablesShelveMode = defaults.object(forKey: Keys.enablesShelveMode) as? Bool
+        let storedHidesRecentApps = defaults.object(forKey: Keys.hidesRecentApps) as? Bool
         let storedAppTileFrontmostClickBehavior = defaults.string(forKey: Keys.appTileFrontmostClickBehavior)
         let storedActiveIndicatorShape = defaults.string(forKey: Keys.activeIndicatorShape)
         let storedActiveIndicatorImagePath = defaults.string(forKey: Keys.activeIndicatorImagePath)
@@ -1723,10 +1902,17 @@ final class DockyPreferences: ObservableObject {
         let storedLeftDividerImagePath = defaults.string(forKey: Keys.leftDividerImagePath)
         let storedRightDividerImagePath = defaults.string(forKey: Keys.rightDividerImagePath)
         let storedMirrorsLeftDividerOnRight = defaults.object(forKey: Keys.mirrorsLeftDividerOnRight) as? Bool
+        let storedActiveIndicatorOffset = defaults.object(forKey: Keys.activeIndicatorOffset) as? Double
+        let storedActiveIndicatorScale = defaults.object(forKey: Keys.activeIndicatorScale) as? Double
+        let storedDividerPaddingFraction = defaults.object(forKey: Keys.dividerPaddingFraction) as? Double
+        let storedDividerImageScale = defaults.object(forKey: Keys.dividerImageScale) as? Double
+        let storedDividerOffset = defaults.object(forKey: Keys.dividerOffset) as? Double
         let storedAppIconOverrides = defaults.data(forKey: Keys.appIconOverrides)
         let storedTrashIconOverrides = defaults.data(forKey: Keys.trashIconOverrides)
+        let storedFolderIconOverrides = defaults.data(forKey: Keys.folderIconOverrides)
         let storedHiddenAppBundleIdentifiers = defaults.stringArray(forKey: Keys.hiddenAppBundleIdentifiers)
         let storedShowsGroupedOpenedAppsInDock = defaults.object(forKey: Keys.showsGroupedOpenedAppsInDock) as? Bool
+        let storedShowsGroupedOpenedAppsBackdrop = defaults.object(forKey: Keys.showsGroupedOpenedAppsBackdrop) as? Bool
         let storedEnablesLaunchpadOverlay = defaults.object(forKey: Keys.enablesLaunchpadOverlay) as? Bool
         let storedLaunchpadOverlayTransparency = defaults.object(forKey: Keys.launchpadOverlayTransparency) as? Double
         let storedLaunchpadGridColumnCount = defaults.object(forKey: Keys.launchpadGridColumnCount) as? Int
@@ -1755,6 +1941,7 @@ final class DockyPreferences: ObservableObject {
         self.windowTintOpacity = storedWindowTintOpacity.map { CGFloat($0) } ?? DefaultValues.windowTintOpacity
         self.disablesGlassLook = storedDisablesGlassLook ?? DefaultValues.disablesGlassLook
         self.windowBackgroundImagePath = storedWindowBackgroundImagePath ?? DefaultValues.windowBackgroundImagePath
+        self.windowBackgroundImageMode = storedWindowBackgroundImageMode.flatMap(DockBackgroundImageMode.init(rawValue:)) ?? DefaultValues.windowBackgroundImageMode
         self.windowPosition = (storedWindowPosition.flatMap(DockWindowPosition.init(rawValue:)) ?? DefaultValues.windowPosition)
         self.windowDisplayTarget = (storedWindowDisplayTarget.flatMap(DockWindowDisplayTarget.init(rawValue:)) ?? DefaultValues.windowDisplayTarget)
         self.windowSpaceBehavior = (storedWindowSpaceBehavior.flatMap(DockWindowSpaceBehavior.init(rawValue:)) ?? DefaultValues.windowSpaceBehavior)
@@ -1776,6 +1963,8 @@ final class DockyPreferences: ObservableObject {
         self.showsActivePinnedSeparator = storedShowsActivePinnedSeparator ?? DefaultValues.showsActivePinnedSeparator
         self.showsRunningApps = storedShowsRunningApps ?? DefaultValues.showsRunningApps
         self.showsMinimizedWindows = storedShowsMinimizedWindows ?? DefaultValues.showsMinimizedWindows
+        self.enablesShelveMode = storedEnablesShelveMode ?? DefaultValues.enablesShelveMode
+        self.hidesRecentApps = storedHidesRecentApps ?? DefaultValues.hidesRecentApps
         self.appTileFrontmostClickBehavior = storedAppTileFrontmostClickBehavior
             .flatMap(AppTileFrontmostClickBehavior.init(rawValue:))
             ?? DefaultValues.appTileFrontmostClickBehavior
@@ -1786,10 +1975,17 @@ final class DockyPreferences: ObservableObject {
         self.leftDividerImagePath = storedLeftDividerImagePath ?? DefaultValues.leftDividerImagePath
         self.rightDividerImagePath = storedRightDividerImagePath ?? DefaultValues.rightDividerImagePath
         self.mirrorsLeftDividerOnRight = storedMirrorsLeftDividerOnRight ?? DefaultValues.mirrorsLeftDividerOnRight
+        self.activeIndicatorOffset = storedActiveIndicatorOffset.map { CGFloat($0) } ?? DefaultValues.activeIndicatorOffset
+        self.activeIndicatorScale = max(0.25, storedActiveIndicatorScale.map { CGFloat($0) } ?? DefaultValues.activeIndicatorScale)
+        self.dividerPaddingFraction = min(max(storedDividerPaddingFraction.map { CGFloat($0) } ?? DefaultValues.dividerPaddingFraction, 0), 0.5)
+        self.dividerImageScale = max(0.25, storedDividerImageScale.map { CGFloat($0) } ?? DefaultValues.dividerImageScale)
+        self.dividerOffset = storedDividerOffset.map { CGFloat($0) } ?? DefaultValues.dividerOffset
         self.appIconOverrides = Self.decodeAppIconOverrides(from: storedAppIconOverrides) ?? DefaultValues.appIconOverrides
         self.trashIconOverrides = Self.decodeTrashIconOverrides(from: storedTrashIconOverrides) ?? DefaultValues.trashIconOverrides
+        self.folderIconOverrides = Self.decodeFolderIconOverrides(from: storedFolderIconOverrides) ?? DefaultValues.folderIconOverrides
         self.hiddenAppBundleIdentifiers = Self.normalizedBundleIdentifiers(storedHiddenAppBundleIdentifiers ?? DefaultValues.hiddenAppBundleIdentifiers)
         self.showsGroupedOpenedAppsInDock = storedShowsGroupedOpenedAppsInDock ?? DefaultValues.showsGroupedOpenedAppsInDock
+        self.showsGroupedOpenedAppsBackdrop = storedShowsGroupedOpenedAppsBackdrop ?? DefaultValues.showsGroupedOpenedAppsBackdrop
         self.enablesLaunchpadOverlay = storedEnablesLaunchpadOverlay ?? DefaultValues.enablesLaunchpadOverlay
         self.launchpadOverlayTransparency = min(max(
             storedLaunchpadOverlayTransparency.map { CGFloat($0) } ?? DefaultValues.launchpadOverlayTransparency,
@@ -1846,6 +2042,7 @@ final class DockyPreferences: ObservableObject {
         windowTintOpacity = DefaultValues.windowTintOpacity
         disablesGlassLook = DefaultValues.disablesGlassLook
         windowBackgroundImagePath = DefaultValues.windowBackgroundImagePath
+        windowBackgroundImageMode = DefaultValues.windowBackgroundImageMode
         windowPosition = DefaultValues.windowPosition
         windowDisplayTarget = DefaultValues.windowDisplayTarget
         windowSpaceBehavior = DefaultValues.windowSpaceBehavior
@@ -1865,6 +2062,8 @@ final class DockyPreferences: ObservableObject {
         showsActivePinnedSeparator = DefaultValues.showsActivePinnedSeparator
         showsRunningApps = DefaultValues.showsRunningApps
         showsMinimizedWindows = DefaultValues.showsMinimizedWindows
+        enablesShelveMode = DefaultValues.enablesShelveMode
+        hidesRecentApps = DefaultValues.hidesRecentApps
         appTileFrontmostClickBehavior = DefaultValues.appTileFrontmostClickBehavior
         activeIndicatorShape = DefaultValues.activeIndicatorShape
         activeIndicatorImagePath = DefaultValues.activeIndicatorImagePath
@@ -1873,10 +2072,17 @@ final class DockyPreferences: ObservableObject {
         leftDividerImagePath = DefaultValues.leftDividerImagePath
         rightDividerImagePath = DefaultValues.rightDividerImagePath
         mirrorsLeftDividerOnRight = DefaultValues.mirrorsLeftDividerOnRight
+        activeIndicatorOffset = DefaultValues.activeIndicatorOffset
+        activeIndicatorScale = DefaultValues.activeIndicatorScale
+        dividerPaddingFraction = DefaultValues.dividerPaddingFraction
+        dividerImageScale = DefaultValues.dividerImageScale
+        dividerOffset = DefaultValues.dividerOffset
         appIconOverrides = DefaultValues.appIconOverrides
         trashIconOverrides = DefaultValues.trashIconOverrides
+        folderIconOverrides = DefaultValues.folderIconOverrides
         hiddenAppBundleIdentifiers = DefaultValues.hiddenAppBundleIdentifiers
         showsGroupedOpenedAppsInDock = DefaultValues.showsGroupedOpenedAppsInDock
+        showsGroupedOpenedAppsBackdrop = DefaultValues.showsGroupedOpenedAppsBackdrop
         enablesLaunchpadOverlay = DefaultValues.enablesLaunchpadOverlay
         launchpadOverlayTransparency = DefaultValues.launchpadOverlayTransparency
         launchpadGridColumnCount = DefaultValues.launchpadGridColumnCount
@@ -2003,6 +2209,15 @@ final class DockyPreferences: ObservableObject {
         defaults.set(data, forKey: Keys.trashIconOverrides)
     }
 
+    private func persistFolderIconOverrides(_ overrides: [FolderIconOverride]) {
+        guard let data = try? encoder.encode(overrides) else {
+            defaults.removeObject(forKey: Keys.folderIconOverrides)
+            return
+        }
+
+        defaults.set(data, forKey: Keys.folderIconOverrides)
+    }
+
     private func persistWindowSwitcherShortcut(_ shortcut: KeyboardShortcut) {
         guard let data = try? encoder.encode(shortcut) else {
             defaults.removeObject(forKey: Keys.windowSwitcherShortcut)
@@ -2059,6 +2274,14 @@ final class DockyPreferences: ObservableObject {
         }
 
         return try? JSONDecoder().decode([TrashIconOverride].self, from: data)
+    }
+
+    private static func decodeFolderIconOverrides(from data: Data?) -> [FolderIconOverride]? {
+        guard let data else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode([FolderIconOverride].self, from: data)
     }
 
     private static func decodeKeyboardShortcut(from data: Data?) -> KeyboardShortcut? {

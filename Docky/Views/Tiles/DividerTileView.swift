@@ -16,6 +16,7 @@ struct DividerTileView: View {
         GeometryReader { proxy in
             divider(globalFrame: proxy.frame(in: .global))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(x: dividerOffsetVector.width, y: dividerOffsetVector.height)
                 .background(.black.opacity(0.001))
                 .contentShape(Path(CGRect(origin: .zero, size: proxy.size)))
                 .background {
@@ -25,6 +26,15 @@ struct DividerTileView: View {
                         }
                     }
                 }
+        }
+    }
+
+    private var dividerOffsetVector: CGSize {
+        let amount = preferences.dividerOffset
+        if position.isVertical {
+            return CGSize(width: amount, height: 0)
+        } else {
+            return CGSize(width: 0, height: -amount)
         }
     }
 
@@ -96,10 +106,11 @@ struct DividerTileView: View {
 
     @ViewBuilder
     private func customImageDivider(nsImage: NSImage, mirrored: Bool) -> some View {
+        let imageScale = max(0.25, preferences.dividerImageScale)
         Image(nsImage: nsImage)
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .scaleEffect(x: mirrored ? -1 : 1, y: 1)
+            .scaleEffect(x: (mirrored ? -1 : 1) * imageScale, y: imageScale)
             .rotationEffect(.degrees(position.isVertical ? 90 : 0))
             .padding(position.isVertical ? .horizontal : .vertical, lineInset)
     }
@@ -126,7 +137,8 @@ struct DividerTileView: View {
     }
 
     private var lineInset: CGFloat {
-        layout.scaled(dockSettings.displayTileSize) * 0.25
+        let fraction = min(max(preferences.dividerPaddingFraction, 0), 0.5)
+        return layout.scaled(dockSettings.displayTileSize) * fraction
     }
 
     private var position: ResolvedDockWindowPosition {

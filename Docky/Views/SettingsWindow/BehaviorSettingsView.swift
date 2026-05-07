@@ -258,6 +258,26 @@ struct BehaviorSettingsView: View {
             .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 8) {
+                Toggle("Disable Recent Apps", isOn: $preferences.hidesRecentApps)
+                    .font(.headline)
+
+                Text("Hides recent / unpinned running apps even when \"Show Running Apps\" is on. Useful when you want a stable dock layout that doesn't shift as apps launch.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Shelve Mode", isOn: $preferences.enablesShelveMode)
+                    .font(.headline)
+
+                Text("Hides Finder and Trash tiles so the dock reads as a clean shelf of pinned apps and widgets.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle("Show Minimized Windows", isOn: $preferences.showsMinimizedWindows)
                     .font(.headline)
 
@@ -398,6 +418,17 @@ struct BehaviorSettingsView: View {
                     .disabled(!product.isUnlocked(.groupedAppFolders))
 
                 Text("Shows running apps from an app folder immediately to the right of that folder, and lets the folder reflect how many grouped apps are open.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Shows Grouping Backdrop", isOn: $preferences.showsGroupedOpenedAppsBackdrop)
+                    .font(.headline)
+                    .disabled(!product.isUnlocked(.groupedAppFolders) || !preferences.showsGroupedOpenedAppsInDock)
+
+                Text("Draws a rounded backdrop around the folder tile and its grouped opened apps. Turn off to keep the grouping without the visual halo.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

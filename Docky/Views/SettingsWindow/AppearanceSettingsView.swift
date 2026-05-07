@@ -38,7 +38,7 @@ struct AppearanceSettingsView: View {
 
     @ViewBuilder
     private var indicatorsSection: some View {
-        Section {
+        Section("Activity Indicator") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Active Indicator Shape")
@@ -91,6 +91,26 @@ struct AppearanceSettingsView: View {
             }
             .padding(.vertical, 4)
 
+            sliderRow(
+                title: "Inward Offset",
+                value: $preferences.activeIndicatorOffset,
+                range: -20...20,
+                step: 1,
+                format: { "\(Int($0)) pt" },
+                description: "Shifts the indicator further from or closer to the screen edge."
+            )
+
+            sliderRow(
+                title: "Size",
+                value: $preferences.activeIndicatorScale,
+                range: 0.5...2.0,
+                step: 0.05,
+                format: { String(format: "%.2fx", $0) },
+                description: "Scales the indicator's rendered size."
+            )
+        }
+
+        Section("Dividers") {
             customDividerImageControls
         }
     }
@@ -138,6 +158,64 @@ struct AppearanceSettingsView: View {
             }
 
             Text("Use a custom image for dividers. The center image applies to dividers near the middle of the dock; the left and right overrides target dividers near each end. Mirror reuses the left image flipped on the right side. In vertical docks the image is rotated 90° to follow the dock's axis.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+
+        sliderRow(
+            title: "Padding",
+            value: $preferences.dividerPaddingFraction,
+            range: 0...0.5,
+            step: 0.01,
+            format: { "\(Int(($0 * 100).rounded()))%" },
+            description: "Controls how much each divider is inset along its short axis, as a fraction of the tile size."
+        )
+
+        sliderRow(
+            title: "Vertical Offset",
+            value: $preferences.dividerOffset,
+            range: -20...20,
+            step: 1,
+            format: { "\(Int($0)) pt" },
+            description: "Shifts dividers along the tile's short axis. Positive values move them up in horizontal docks or right in vertical docks."
+        )
+
+        sliderRow(
+            title: "Image Size",
+            value: $preferences.dividerImageScale,
+            range: 0.5...2.0,
+            step: 0.05,
+            format: { String(format: "%.2fx", $0) },
+            description: "Scales custom divider images. Has no effect on the default line."
+        )
+    }
+
+    @ViewBuilder
+    private func sliderRow(
+        title: String,
+        value: Binding<CGFloat>,
+        range: ClosedRange<CGFloat>,
+        step: CGFloat,
+        format: @escaping (CGFloat) -> String,
+        description: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+
+            HStack {
+                Slider(value: value, in: range, step: step) {
+                    Text(title)
+                }
+                .labelsHidden()
+
+                Text(format(value.wrappedValue))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 64, alignment: .trailing)
+            }
+
+            Text(description)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -362,6 +440,25 @@ struct AppearanceSettingsView: View {
                 }
 
                 Text("Use an image with aspect fill behind the dock tiles. When set, it replaces the material tint and opacity until cleared.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Text("Background Image Mode")
+
+                    Spacer()
+
+                    Picker("Background Image Mode", selection: $preferences.windowBackgroundImageMode) {
+                        ForEach(DockBackgroundImageMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .disabled(preferences.windowBackgroundImagePath == nil)
+                }
+
+                Text("Sprite mode keeps the leading and trailing thirds of the image pinned and stretches the middle along the dock's axis.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

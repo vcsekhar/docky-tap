@@ -25,6 +25,22 @@ struct AppIconsSettingsView: View {
                 }
             }
 
+            Section("Folders") {
+                Text("Pick custom images for any folder tile currently in the dock. Each folder defaults to its system icon.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if folderEntries.isEmpty {
+                    Text("No folder tiles are currently in the dock.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(folderEntries) { entry in
+                        FolderIconOverrideRow(entry: entry)
+                            .padding(.vertical, 4)
+                    }
+                }
+            }
+
             Section("Overrides") {
                 if !product.isUnlocked(.customAppIcons) {
                     ProFeatureNotice(feature: .customAppIcons)
@@ -80,6 +96,33 @@ struct AppIconsSettingsView: View {
             let comparison = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
             if comparison == .orderedSame {
                 return lhs.bundleIdentifier.localizedCaseInsensitiveCompare(rhs.bundleIdentifier) == .orderedAscending
+            }
+            return comparison == .orderedAscending
+        }
+    }
+
+    private var folderEntries: [FolderIconSettingsEntry] {
+        var seenPaths: Set<String> = []
+        var entries: [FolderIconSettingsEntry] = []
+
+        for item in preferences.trailingItems {
+            guard item.kind == .folder, let url = item.folderURL else { continue }
+            let path = url.path
+            guard seenPaths.insert(path).inserted else { continue }
+            let displayName = item.folderDisplayName?.isEmpty == false
+                ? item.folderDisplayName!
+                : FileManager.default.displayName(atPath: path)
+            entries.append(FolderIconSettingsEntry(
+                folderPath: path,
+                displayName: displayName,
+                systemIcon: IconCacheService.shared.previewIcon(forFileURL: url)
+            ))
+        }
+
+        return entries.sorted { lhs, rhs in
+            let comparison = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+            if comparison == .orderedSame {
+                return lhs.folderPath.localizedCaseInsensitiveCompare(rhs.folderPath) == .orderedAscending
             }
             return comparison == .orderedAscending
         }
@@ -260,6 +303,96 @@ private struct TrashIconOverrideRow: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             preferences.setTrashIconOverride(state: state, iconPath: url.path)
+        }
+    }
+}
+
+private struct FolderIconSettingsEntry: Identifiable {
+    let folderPath: String
+    let displayName: String
+    let systemIcon: NSImage
+
+    var id: String { folderPath }
+}
+
+private struct FolderIconOverrideRow: View {
+    let entry: FolderIconSettingsEntry
+
+    @ObservedObject private var preferences = DockyPreferences.shared
+    @ObservedObject private var product = ProductService.shared
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(nsImage: previewImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.displayName)
+                    .font(.headline)
+
+                Text(entry.folderPath)
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if let overrideName {
+                    Text("Override: \(overrideName)")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button("Choose Image...") {
+                    chooseOverrideImage()
+                }
+                .disabled(!product.isUnlocked(.customAppIcons))
+
+                if overrideEntry != nil {
+                    Button("Clear") {
+                        preferences.removeFolderIconOverride(folderPath: entry.folderPath)
+                    }
+                    .disabled(!product.isUnlocked(.customAppIcons))
+                }
+            }
+        }
+    }
+
+    private var overrideEntry: FolderIconOverride? {
+        preferences.folderIconOverride(forPath: entry.folderPath)
+    }
+
+    private var overrideName: String? {
+        guard let iconPath = overrideEntry?.iconPath, !iconPath.isEmpty else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: iconPath).lastPathComponent
+    }
+
+    private var previewImage: NSImage {
+        if let overrideURL = overrideEntry?.effectiveIconURL,
+           let overrideImage = IconCacheService.shared.image(forImageFileURL: overrideURL) {
+            return overrideImage
+        }
+
+        return entry.systemIcon
+    }
+
+    private func chooseOverrideImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            preferences.setFolderIconOverride(folderPath: entry.folderPath, iconPath: url.path)
         }
     }
 }
