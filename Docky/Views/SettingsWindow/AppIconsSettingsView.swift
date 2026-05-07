@@ -14,6 +14,17 @@ struct AppIconsSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Trash") {
+                Text("Pick custom images for the Trash tile's empty and full states. Both default to the system Trash icons.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(TrashIconState.allCases) { state in
+                    TrashIconOverrideRow(state: state)
+                        .padding(.vertical, 4)
+                }
+            }
+
             Section("Overrides") {
                 if !product.isUnlocked(.customAppIcons) {
                     ProFeatureNotice(feature: .customAppIcons)
@@ -169,4 +180,86 @@ private struct AppIconSettingsEntry: Identifiable {
     let systemIcon: NSImage
 
     var id: String { bundleIdentifier }
+}
+
+private struct TrashIconOverrideRow: View {
+    let state: TrashIconState
+
+    @ObservedObject private var preferences = DockyPreferences.shared
+    @ObservedObject private var product = ProductService.shared
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(nsImage: previewImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Trash (\(state.title))")
+                    .font(.headline)
+
+                Text(state == .empty
+                     ? "Shown when the Trash is empty."
+                     : "Shown when the Trash has items.")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+
+                if let overrideName {
+                    Text("Override: \(overrideName)")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button("Choose Image...") {
+                    chooseOverrideImage()
+                }
+                .disabled(!product.isUnlocked(.customAppIcons))
+
+                if overrideEntry != nil {
+                    Button("Clear") {
+                        preferences.removeTrashIconOverride(state: state)
+                    }
+                    .disabled(!product.isUnlocked(.customAppIcons))
+                }
+            }
+        }
+    }
+
+    private var overrideEntry: TrashIconOverride? {
+        preferences.trashIconOverride(forState: state)
+    }
+
+    private var overrideName: String? {
+        guard let iconPath = overrideEntry?.iconPath, !iconPath.isEmpty else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: iconPath).lastPathComponent
+    }
+
+    private var previewImage: NSImage {
+        if let overrideURL = overrideEntry?.effectiveIconURL,
+           let overrideImage = IconCacheService.shared.image(forImageFileURL: overrideURL) {
+            return overrideImage
+        }
+
+        return NSImage(named: state.systemImageName) ?? NSImage()
+    }
+
+    private func chooseOverrideImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            preferences.setTrashIconOverride(state: state, iconPath: url.path)
+        }
+    }
 }

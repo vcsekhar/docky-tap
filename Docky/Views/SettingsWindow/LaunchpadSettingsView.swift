@@ -68,12 +68,23 @@ struct LaunchpadSettingsView: View {
 
                         Spacer()
 
-                        Stepper("\(preferences.launchpadGridColumnCount)", value: $preferences.launchpadGridColumnCount, in: 1...10)
+                        Stepper("\(preferences.launchpadGridColumnCount)", value: $preferences.launchpadGridColumnCount, in: 1...12)
                             .foregroundStyle(.secondary)
                             .disabled(!product.isUnlocked(.launchpad) || !preferences.enablesLaunchpadOverlay)
                     }
 
-                    Text("Controls the default Launchpad grid width. Docky uses this many columns when they fit on screen, starting at 7 by default.")
+                    HStack {
+                        Text("Grid Rows")
+                            .font(.headline)
+
+                        Spacer()
+
+                        Stepper("\(preferences.launchpadGridRowCount)", value: $preferences.launchpadGridRowCount, in: 1...10)
+                            .foregroundStyle(.secondary)
+                            .disabled(!product.isUnlocked(.launchpad) || !preferences.enablesLaunchpadOverlay)
+                    }
+
+                    Text("Sets the Launchpad grid dimensions. Docky uses these counts when the icons fit on screen, defaulting to 7 columns × 5 rows.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

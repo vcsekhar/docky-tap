@@ -240,9 +240,15 @@ final class WindowPreviewWindowController: NSWindowController, ObservableObject 
     /// WidgetExpansionWindowController's overflow handling per dock side.
     private func frameOrigin(
         for size: CGSize,
-        sourceFrame: CGRect,
+        sourceFrame originalSourceFrame: CGRect,
         preferredEdge: NSRectEdge
     ) -> CGPoint {
+        // proxy.frame(in: .global) reports SwiftUI top-left coords relative to
+        // the dock window's hosting view. Convert to AppKit screen bottom-left
+        // before placing this NSWindow — otherwise vertical docks see a Y flip
+        // and centered docks see an X offset (bottom docks happened to work by
+        // coincidence when the tile sat at the dock window's vertical center).
+        let sourceFrame = convertToScreen(originalSourceFrame)
         let screen = NSScreen.screens.first { $0.visibleFrame.intersects(sourceFrame) } ?? NSScreen.main
         guard let visibleFrame = screen?.visibleFrame else {
             return CGPoint(x: sourceFrame.midX - size.width / 2, y: sourceFrame.maxY)
@@ -280,6 +286,18 @@ final class WindowPreviewWindowController: NSWindowController, ObservableObject 
         @unknown default:
             return CGPoint(x: sourceFrame.midX - size.width / 2, y: sourceFrame.maxY)
         }
+    }
+
+    private func convertToScreen(_ frame: CGRect) -> CGRect {
+        guard let dockFrame = NSApp.windows.compactMap({ $0 as? MainWindow }).first?.frame else {
+            return frame
+        }
+        return CGRect(
+            x: dockFrame.minX + frame.minX,
+            y: dockFrame.maxY - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
     }
 
     private enum Axis { case x, y }

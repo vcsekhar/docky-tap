@@ -230,11 +230,17 @@ private struct LaunchpadOverlayView: View {
     private let rowSpacing: CGFloat = 32
     private let horizontalInset: CGFloat = 80
     private let bottomInset: CGFloat = 56
-    private let pageColumns = 7
-    private let pageRows = 5
     private let wallpaperBlurRadius: CGFloat = 50
-
-    private var pageSize: Int { pageColumns * pageRows }
+    /// Reference logical screen height the launchpad metrics are tuned
+    /// for (1440p): at this height, icons render at exactly `baseIconSize`
+    /// and gaps at the configured `columnSpacing` / `rowSpacing` values.
+    /// Taller or shorter screens scale linearly off this baseline.
+    private let referenceScreenHeight: CGFloat = 1440
+    /// Icon edge length at the reference screen height. Icons at other
+    /// heights are `baseIconSize × (screenHeight / referenceScreenHeight)`.
+    private let baseIconSize: CGFloat = 128
+    /// Reference label height below the icon, scaled with the icon.
+    private let baseLabelHeight: CGFloat = 22
 
     var body: some View {
         #if DEBUG
@@ -243,11 +249,32 @@ private struct LaunchpadOverlayView: View {
 
         GeometryReader { proxy in
             let topInset = searchBarTopInset + searchBarHeight + 56
-            let usableWidth = max(0, proxy.size.width - horizontalInset * 2)
+            // Linear scale off the 1440p reference (screen *height*).
+            // Clamped so very small or very large displays don't blow up
+            // the cell math.
+            let scale = max(0.5, min(2.5, proxy.size.height / referenceScreenHeight))
+            let iconSize = baseIconSize * scale
+            let labelHeight = baseLabelHeight * scale
+            let cellSpacing = iconSize * 0.04
+            let scaledColumnSpacing = columnSpacing * scale
+            let scaledRowSpacing = rowSpacing * scale
+            let scaledHorizontalInset = horizontalInset * scale
+            let cellWidth = iconSize
+            let cellHeight = iconSize + labelHeight + cellSpacing
+            let usableWidth = max(0, proxy.size.width - scaledHorizontalInset * 2)
             let usableHeight = max(0, proxy.size.height - topInset - bottomInset)
-            let cellWidth = max(80, (usableWidth - columnSpacing * CGFloat(pageColumns - 1)) / CGFloat(pageColumns))
-            let cellHeight = max(80, (usableHeight - rowSpacing * CGFloat(pageRows - 1)) / CGFloat(pageRows))
-            let pages = paginatedEntries
+            // Columns from the user preference, but clamped so the row
+            // doesn't overflow the screen on narrow displays.
+            let configuredColumns = max(1, preferences.launchpadGridColumnCount)
+            let configuredRows = max(1, preferences.launchpadGridRowCount)
+            let maxColumnsThatFit = max(1, Int((usableWidth + scaledColumnSpacing) / (cellWidth + scaledColumnSpacing)))
+            let maxRowsThatFit = max(1, Int((usableHeight + scaledRowSpacing) / (cellHeight + scaledRowSpacing)))
+            let pageColumns = max(1, min(configuredColumns, maxColumnsThatFit))
+            // Honor the configured row count, but never exceed what fits
+            // on screen — otherwise rows would overflow the page.
+            let pageRows = max(1, min(configuredRows, maxRowsThatFit))
+            let pageSize = pageColumns * pageRows
+            let pages = paginate(filteredEntries, pageSize: pageSize)
 
             ZStack {
                 wallpaperBackground(in: proxy.size)
@@ -267,7 +294,11 @@ private struct LaunchpadOverlayView: View {
                                     pageEntries: pages[pageIndex],
                                     cellWidth: cellWidth,
                                     cellHeight: cellHeight,
-                                    pageWidth: proxy.size.width
+                                    pageWidth: proxy.size.width,
+                                    columns: pageColumns,
+                                    columnSpacing: scaledColumnSpacing,
+                                    rowSpacing: scaledRowSpacing,
+                                    horizontalInset: scaledHorizontalInset
                                 )
                                 .id("page-\(pageIndex)")
                             }
@@ -374,36 +405,39 @@ private struct LaunchpadOverlayView: View {
         pageEntries: [LaunchpadEntry],
         cellWidth: CGFloat,
         cellHeight: CGFloat,
-        pageWidth: CGFloat
+        pageWidth: CGFloat,
+        columns: Int,
+        columnSpacing: CGFloat,
+        rowSpacing: CGFloat,
+        horizontalInset: CGFloat
     ) -> some View {
-        let columns = Array(
+        let gridColumns = Array(
             repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing, alignment: .top),
-            count: pageColumns
+            count: columns
         )
 
-        // HStack + trailing Spacer pins the grid to the leading edge so a
-        // partially filled page (e.g., a search result with a handful of
-        // matches) anchors at top-leading instead of centering. The
-        // surrounding `.frame(maxHeight: .infinity, alignment: .top)` does
-        // the same thing on the vertical axis.
+        // Center the grid horizontally on the page: spacers on either
+        // side of a `.fixedSize`-clamped LazyVGrid eat the leftover width
+        // equally. Vertical alignment stays at the top via the outer
+        // `.frame(maxHeight: .infinity, alignment: .top)`.
         return HStack(alignment: .top, spacing: 0) {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: rowSpacing) {
+            Spacer(minLength: horizontalInset)
+
+            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: rowSpacing) {
                 ForEach(pageEntries) { entry in
                     entryCell(
                         for: entry,
                         cellSize: CGSize(width: cellWidth, height: cellHeight)
                     )
-                    .background(.red)
                     .frame(width: cellWidth, height: cellHeight)
                     .id(entry.id)
-                    .background(.blue)
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: horizontalInset)
         }
-        .padding(.leading, horizontalInset)
-        .frame(width: pageWidth, alignment: .topLeading)
+        .frame(width: pageWidth, alignment: .top)
         .frame(maxHeight: .infinity, alignment: .top)
         // Sits behind the grid so button taps on icons consume their own
         // gesture first; only taps on truly empty page area fall through
@@ -430,9 +464,8 @@ private struct LaunchpadOverlayView: View {
         return effective > 0.55 ? .light : .dark
     }
 
-    private var paginatedEntries: [[LaunchpadEntry]] {
-        let entries = filteredEntries
-        guard !entries.isEmpty else { return [[]] }
+    private func paginate(_ entries: [LaunchpadEntry], pageSize: Int) -> [[LaunchpadEntry]] {
+        guard !entries.isEmpty, pageSize > 0 else { return [[]] }
         return stride(from: 0, to: entries.count, by: pageSize).map { offset in
             Array(entries[offset..<min(offset + pageSize, entries.count)])
         }
@@ -667,15 +700,11 @@ private struct LaunchpadAppCard: View {
         cellSize.height * 0.04
     }
 
-    /// Sizes the icon so the card's `icon + spacing + label` stack fills
-    /// the cell vertically. With grid spacing at zero this leaves no
-    /// vertical gap between rows; horizontally the icon is also clamped to
-    /// `cellSize.width` so wide cells still shrink the icon to fit.
-    private var iconSide: CGFloat {
-        let labelHeight: CGFloat = 22
-        let availableForIcon = cellSize.height - labelHeight - cellSpacing
-        return max(40, min(cellSize.width, availableForIcon))
-    }
+    /// Icon fills the cell horizontally. The body sizes the cell so its
+    /// width equals the launchpad's scaled icon size (128 px at the 1440p
+    /// reference, scaled linearly elsewhere), so this also drives the
+    /// rendered icon size.
+    private var iconSide: CGFloat { cellSize.width }
 
     private var icon: NSImage {
         if let overrideURL = preferences.effectiveAppIconOverrideURL(forBundleIdentifier: app.bundleIdentifier),
@@ -765,14 +794,9 @@ private struct LaunchpadFolderCard: View {
         .frame(width: tileSide, height: tileSide)
     }
 
-    /// Same sizing math as `LaunchpadAppCard.iconSide` so a folder tile in
-    /// the launchpad grid is exactly as large as a regular app tile in
-    /// the same row.
-    private var tileSide: CGFloat {
-        let labelHeight: CGFloat = 22
-        let availableForTile = cellSize.height - labelHeight - cellSpacing
-        return max(40, min(cellSize.width, availableForTile))
-    }
+    /// Matches `LaunchpadAppCard.iconSide` so folder tiles render the same
+    /// size as app tiles in the launchpad grid.
+    private var tileSide: CGFloat { cellSize.width }
 
     private func icon(forBundleIdentifier bundleIdentifier: String) -> NSImage {
         if let overrideURL = preferences.effectiveAppIconOverrideURL(forBundleIdentifier: bundleIdentifier),
@@ -823,29 +847,24 @@ private struct ExpandedFolderOverlay: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let cardWidth = max(0, proxy.size.width - proxy.size.width * horizontalPaddingFraction * 2)
-            // Cells fill the card's horizontal space exactly: cell width is
-            // whatever's left after the inset and column gaps. Height
-            // follows the launchpad cell's aspect ratio so the label area
-            // stays proportional even when the cells are bigger or smaller
-            // than the launchpad's.
-            let availableForCells = max(0, cardWidth
-                - cardHorizontalInset * 2
-                - cardColumnSpacing * CGFloat(max(0, columnsPerPage - 1)))
-            let cellWidth = max(40, availableForCells / CGFloat(max(columnsPerPage, 1)))
-            let aspect = sourceCellSize.width > 0 ? sourceCellSize.height / sourceCellSize.width : 1
-            let cellHeight = max(40, cellWidth * aspect)
-            let cellSize = CGSize(width: cellWidth, height: cellHeight)
+            // Cells in the expanded folder are exactly the same size as
+            // the launchpad cells behind it, so icons render at the same
+            // resolution. The card grows to fit `columnsPerPage` cells
+            // horizontally; vertically it hugs the rows actually used.
+            let cellSize = sourceCellSize
             let pages = paginate(folder.apps, pageSize: pageSize)
-            // Hug content vertically: the card only reserves rows it
-            // actually uses. With a single short page the card stays
-            // tight; long folders fill all `rowsPerPage` and paginate.
             let maxAppsOnAnyPage = pages.map(\.count).max() ?? 0
             let usedRows = max(1, Int(ceil(Double(maxAppsOnAnyPage) / Double(max(columnsPerPage, 1)))))
             let needsIndicator = pages.count > 1
+            let gridContentWidth = CGFloat(columnsPerPage) * cellSize.width
+                + CGFloat(max(0, columnsPerPage - 1)) * cardColumnSpacing
             let gridContentHeight = CGFloat(usedRows) * cellSize.height
                 + CGFloat(max(0, usedRows - 1)) * cardRowSpacing
             let indicatorReservedHeight: CGFloat = needsIndicator ? indicatorAreaHeight : 0
+            let cardWidth = min(
+                proxy.size.width,
+                gridContentWidth + cardHorizontalInset * 2
+            )
             let cardHeight = min(
                 proxy.size.height,
                 gridContentHeight + indicatorReservedHeight + cardVerticalInset * 2
@@ -936,7 +955,12 @@ private struct ExpandedFolderOverlay: View {
             count: columnsPerPage
         )
 
+        // Mirror the launchpad's pageGrid centering: spacers on either side
+        // eat leftover width equally so the grid sits centered in the
+        // card rather than pinned to the leading edge.
         return HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: cardHorizontalInset)
+
             LazyVGrid(columns: gridColumns, alignment: .leading, spacing: cardRowSpacing) {
                 ForEach(apps, id: \.bundleIdentifier) { app in
                     Button {
@@ -947,11 +971,11 @@ private struct ExpandedFolderOverlay: View {
                     .buttonStyle(.plain)
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: cardHorizontalInset)
         }
-        .padding(.horizontal, cardHorizontalInset)
-        .frame(width: pageWidth, alignment: .topLeading)
+        .frame(width: pageWidth, alignment: .top)
     }
 
     private func paginate(_ apps: [AppTile], pageSize: Int) -> [[AppTile]] {

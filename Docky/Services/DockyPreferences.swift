@@ -574,6 +574,42 @@ struct AppIconOverride: Codable, Equatable, Identifiable {
     }
 }
 
+enum TrashIconState: String, Codable, CaseIterable, Identifiable {
+    case empty
+    case full
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .empty: "Empty"
+        case .full: "Full"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .empty: "NSTrashEmpty"
+        case .full: "NSTrashFull"
+        }
+    }
+}
+
+struct TrashIconOverride: Codable, Equatable, Identifiable {
+    let state: TrashIconState
+    let iconPath: String
+
+    var id: String { state.rawValue }
+
+    var effectiveIconURL: URL? {
+        guard !iconPath.isEmpty, FileManager.default.fileExists(atPath: iconPath) else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: iconPath)
+    }
+}
+
 struct DockColor: Codable, Equatable {
     let red: Double
     let green: Double
@@ -1088,11 +1124,66 @@ final class DockyPreferences: ObservableObject {
         }
     }
 
+    /// Optional image path used as the default divider image (applies to all dividers).
+    @Published var dividerImagePath: String? {
+        didSet {
+            guard dividerImagePath != oldValue else { return }
+
+            if let dividerImagePath, !dividerImagePath.isEmpty {
+                defaults.set(dividerImagePath, forKey: Keys.dividerImagePath)
+            } else {
+                defaults.removeObject(forKey: Keys.dividerImagePath)
+            }
+        }
+    }
+
+    /// Optional image path that overrides the global divider image for the leading section divider.
+    @Published var leftDividerImagePath: String? {
+        didSet {
+            guard leftDividerImagePath != oldValue else { return }
+
+            if let leftDividerImagePath, !leftDividerImagePath.isEmpty {
+                defaults.set(leftDividerImagePath, forKey: Keys.leftDividerImagePath)
+            } else {
+                defaults.removeObject(forKey: Keys.leftDividerImagePath)
+            }
+        }
+    }
+
+    /// Optional image path that overrides the global divider image for the trailing section divider.
+    @Published var rightDividerImagePath: String? {
+        didSet {
+            guard rightDividerImagePath != oldValue else { return }
+
+            if let rightDividerImagePath, !rightDividerImagePath.isEmpty {
+                defaults.set(rightDividerImagePath, forKey: Keys.rightDividerImagePath)
+            } else {
+                defaults.removeObject(forKey: Keys.rightDividerImagePath)
+            }
+        }
+    }
+
+    /// When true, the trailing divider mirrors the leading divider's image instead of using its own override.
+    @Published var mirrorsLeftDividerOnRight: Bool {
+        didSet {
+            guard mirrorsLeftDividerOnRight != oldValue else { return }
+            defaults.set(mirrorsLeftDividerOnRight, forKey: Keys.mirrorsLeftDividerOnRight)
+        }
+    }
+
     /// Optional per-app icon overrides used by app tiles.
     @Published var appIconOverrides: [AppIconOverride] {
         didSet {
             guard appIconOverrides != oldValue else { return }
             persistAppIconOverrides(appIconOverrides)
+        }
+    }
+
+    /// Optional icon overrides for the Trash tile, keyed by empty/full state.
+    @Published var trashIconOverrides: [TrashIconOverride] {
+        didSet {
+            guard trashIconOverrides != oldValue else { return }
+            persistTrashIconOverrides(trashIconOverrides)
         }
     }
 
@@ -1171,6 +1262,26 @@ final class DockyPreferences: ObservableObject {
             }
 
             defaults.set(clampedValue, forKey: Keys.launchpadGridColumnCount)
+        }
+    }
+
+    /// Preferred row count for the Launchpad overlay grid.
+    @Published var launchpadGridRowCount: Int {
+        didSet {
+            let clampedValue = max(1, launchpadGridRowCount)
+            guard clampedValue != oldValue else {
+                if launchpadGridRowCount != clampedValue {
+                    launchpadGridRowCount = clampedValue
+                }
+                return
+            }
+
+            if launchpadGridRowCount != clampedValue {
+                launchpadGridRowCount = clampedValue
+                return
+            }
+
+            defaults.set(clampedValue, forKey: Keys.launchpadGridRowCount)
         }
     }
 
@@ -1320,6 +1431,48 @@ final class DockyPreferences: ObservableObject {
         return URL(fileURLWithPath: activeIndicatorImagePath)
     }
 
+    var effectiveDividerImageURL: URL? {
+        Self.existingFileURL(at: dividerImagePath)
+    }
+
+    var effectiveLeftDividerImageURL: URL? {
+        Self.existingFileURL(at: leftDividerImagePath) ?? effectiveDividerImageURL
+    }
+
+    var effectiveRightDividerImageURL: URL? {
+        if mirrorsLeftDividerOnRight {
+            return effectiveLeftDividerImageURL
+        }
+
+        return Self.existingFileURL(at: rightDividerImagePath) ?? effectiveDividerImageURL
+    }
+
+    /// Resolves the divider image and mirroring flag for a given divider position class.
+    /// Returns `nil` when no custom image applies.
+    func resolvedDividerImage(forPositionClass positionClass: DockDividerPositionClass) -> (url: URL, mirrored: Bool)? {
+        switch positionClass {
+        case .left:
+            guard let url = effectiveLeftDividerImageURL else { return nil }
+            return (url, false)
+        case .right:
+            if mirrorsLeftDividerOnRight, let url = effectiveLeftDividerImageURL {
+                return (url, true)
+            }
+
+            guard let url = effectiveRightDividerImageURL else { return nil }
+            return (url, false)
+        case .center:
+            guard let url = effectiveDividerImageURL else { return nil }
+            return (url, false)
+        }
+    }
+
+    private static func existingFileURL(at path: String?) -> URL? {
+        guard let path, !path.isEmpty else { return nil }
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
     func appIconOverride(forBundleIdentifier bundleIdentifier: String) -> AppIconOverride? {
         guard ProductService.shared.isUnlocked(.customAppIcons) else {
             return nil
@@ -1355,6 +1508,38 @@ final class DockyPreferences: ObservableObject {
 
     func removeAppIconOverride(bundleIdentifier: String) {
         appIconOverrides.removeAll { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    func trashIconOverride(forState state: TrashIconState) -> TrashIconOverride? {
+        guard ProductService.shared.isUnlocked(.customAppIcons) else {
+            return nil
+        }
+
+        return trashIconOverrides.first { $0.state == state }
+    }
+
+    func effectiveTrashIconOverrideURL(forState state: TrashIconState) -> URL? {
+        trashIconOverride(forState: state)?.effectiveIconURL
+    }
+
+    func setTrashIconOverride(state: TrashIconState, iconPath: String) {
+        guard ProductService.shared.isUnlocked(.customAppIcons) else {
+            return
+        }
+
+        guard !iconPath.isEmpty else {
+            return
+        }
+
+        var overridesByState = Dictionary(uniqueKeysWithValues: trashIconOverrides.map {
+            ($0.state, $0)
+        })
+        overridesByState[state] = TrashIconOverride(state: state, iconPath: iconPath)
+        trashIconOverrides = TrashIconState.allCases.compactMap { overridesByState[$0] }
+    }
+
+    func removeTrashIconOverride(state: TrashIconState) {
+        trashIconOverrides.removeAll { $0.state == state }
     }
 
     func isAppHiddenInDocky(bundleIdentifier: String) -> Bool {
@@ -1415,12 +1600,18 @@ final class DockyPreferences: ObservableObject {
         static let activeIndicatorShape = "docky.activeIndicatorShape"
         static let activeIndicatorImagePath = "docky.activeIndicatorImagePath"
         static let activeIndicatorColor = "docky.activeIndicatorColor"
+        static let dividerImagePath = "docky.dividerImagePath"
+        static let leftDividerImagePath = "docky.leftDividerImagePath"
+        static let rightDividerImagePath = "docky.rightDividerImagePath"
+        static let mirrorsLeftDividerOnRight = "docky.mirrorsLeftDividerOnRight"
         static let appIconOverrides = "docky.appIconOverrides"
+        static let trashIconOverrides = "docky.trashIconOverrides"
         static let hiddenAppBundleIdentifiers = "docky.hiddenAppBundleIdentifiers"
         static let showsGroupedOpenedAppsInDock = "docky.showsGroupedOpenedAppsInDock"
         static let enablesLaunchpadOverlay = "docky.enablesLaunchpadOverlay"
         static let launchpadOverlayTransparency = "docky.launchpadOverlayTransparency"
         static let launchpadGridColumnCount = "docky.launchpadGridColumnCount"
+        static let launchpadGridRowCount = "docky.launchpadGridRowCount"
         static let launchpadShortcut = "docky.launchpadShortcut"
         static let enablesWindowSwitcher = "docky.enablesWindowSwitcher"
         static let windowSwitcherShortcut = "docky.windowSwitcherShortcut"
@@ -1468,12 +1659,18 @@ final class DockyPreferences: ObservableObject {
         static let activeIndicatorShape: DockTileIndicatorShape = .dot
         static let activeIndicatorImagePath: String? = nil
         static let activeIndicatorColor: DockColor? = nil
+        static let dividerImagePath: String? = nil
+        static let leftDividerImagePath: String? = nil
+        static let rightDividerImagePath: String? = nil
+        static let mirrorsLeftDividerOnRight = false
         static let appIconOverrides: [AppIconOverride] = []
+        static let trashIconOverrides: [TrashIconOverride] = []
         static let hiddenAppBundleIdentifiers: [String] = []
         static let showsGroupedOpenedAppsInDock = true
         static let enablesLaunchpadOverlay = true
         static let launchpadOverlayTransparency: CGFloat = 0.4
         static let launchpadGridColumnCount = 7
+        static let launchpadGridRowCount = 5
         static let launchpadShortcut = KeyboardShortcut.empty
         static let enablesWindowSwitcher = true
         static let windowSwitcherShortcut = KeyboardShortcut(keyCode: 48, modifierFlags: [.option])
@@ -1522,12 +1719,18 @@ final class DockyPreferences: ObservableObject {
         let storedActiveIndicatorShape = defaults.string(forKey: Keys.activeIndicatorShape)
         let storedActiveIndicatorImagePath = defaults.string(forKey: Keys.activeIndicatorImagePath)
         let storedActiveIndicatorColor = defaults.data(forKey: Keys.activeIndicatorColor)
+        let storedDividerImagePath = defaults.string(forKey: Keys.dividerImagePath)
+        let storedLeftDividerImagePath = defaults.string(forKey: Keys.leftDividerImagePath)
+        let storedRightDividerImagePath = defaults.string(forKey: Keys.rightDividerImagePath)
+        let storedMirrorsLeftDividerOnRight = defaults.object(forKey: Keys.mirrorsLeftDividerOnRight) as? Bool
         let storedAppIconOverrides = defaults.data(forKey: Keys.appIconOverrides)
+        let storedTrashIconOverrides = defaults.data(forKey: Keys.trashIconOverrides)
         let storedHiddenAppBundleIdentifiers = defaults.stringArray(forKey: Keys.hiddenAppBundleIdentifiers)
         let storedShowsGroupedOpenedAppsInDock = defaults.object(forKey: Keys.showsGroupedOpenedAppsInDock) as? Bool
         let storedEnablesLaunchpadOverlay = defaults.object(forKey: Keys.enablesLaunchpadOverlay) as? Bool
         let storedLaunchpadOverlayTransparency = defaults.object(forKey: Keys.launchpadOverlayTransparency) as? Double
         let storedLaunchpadGridColumnCount = defaults.object(forKey: Keys.launchpadGridColumnCount) as? Int
+        let storedLaunchpadGridRowCount = defaults.object(forKey: Keys.launchpadGridRowCount) as? Int
         let storedLaunchpadShortcut = defaults.data(forKey: Keys.launchpadShortcut)
         let storedEnablesWindowSwitcher = defaults.object(forKey: Keys.enablesWindowSwitcher) as? Bool
         let storedWindowSwitcherShortcut = defaults.data(forKey: Keys.windowSwitcherShortcut)
@@ -1579,7 +1782,12 @@ final class DockyPreferences: ObservableObject {
         self.activeIndicatorShape = (storedActiveIndicatorShape.flatMap(DockTileIndicatorShape.init(rawValue:)) ?? DefaultValues.activeIndicatorShape)
         self.activeIndicatorImagePath = storedActiveIndicatorImagePath ?? DefaultValues.activeIndicatorImagePath
         self.activeIndicatorColor = Self.decodeColor(from: storedActiveIndicatorColor) ?? DefaultValues.activeIndicatorColor
+        self.dividerImagePath = storedDividerImagePath ?? DefaultValues.dividerImagePath
+        self.leftDividerImagePath = storedLeftDividerImagePath ?? DefaultValues.leftDividerImagePath
+        self.rightDividerImagePath = storedRightDividerImagePath ?? DefaultValues.rightDividerImagePath
+        self.mirrorsLeftDividerOnRight = storedMirrorsLeftDividerOnRight ?? DefaultValues.mirrorsLeftDividerOnRight
         self.appIconOverrides = Self.decodeAppIconOverrides(from: storedAppIconOverrides) ?? DefaultValues.appIconOverrides
+        self.trashIconOverrides = Self.decodeTrashIconOverrides(from: storedTrashIconOverrides) ?? DefaultValues.trashIconOverrides
         self.hiddenAppBundleIdentifiers = Self.normalizedBundleIdentifiers(storedHiddenAppBundleIdentifiers ?? DefaultValues.hiddenAppBundleIdentifiers)
         self.showsGroupedOpenedAppsInDock = storedShowsGroupedOpenedAppsInDock ?? DefaultValues.showsGroupedOpenedAppsInDock
         self.enablesLaunchpadOverlay = storedEnablesLaunchpadOverlay ?? DefaultValues.enablesLaunchpadOverlay
@@ -1588,6 +1796,7 @@ final class DockyPreferences: ObservableObject {
             0
         ), 1)
         self.launchpadGridColumnCount = max(storedLaunchpadGridColumnCount ?? DefaultValues.launchpadGridColumnCount, 1)
+        self.launchpadGridRowCount = max(storedLaunchpadGridRowCount ?? DefaultValues.launchpadGridRowCount, 1)
         self.launchpadShortcut = Self.decodeKeyboardShortcut(from: storedLaunchpadShortcut) ?? DefaultValues.launchpadShortcut
         self.enablesWindowSwitcher = storedEnablesWindowSwitcher ?? DefaultValues.enablesWindowSwitcher
         self.windowSwitcherShortcut = Self.decodeKeyboardShortcut(from: storedWindowSwitcherShortcut) ?? DefaultValues.windowSwitcherShortcut
@@ -1660,12 +1869,18 @@ final class DockyPreferences: ObservableObject {
         activeIndicatorShape = DefaultValues.activeIndicatorShape
         activeIndicatorImagePath = DefaultValues.activeIndicatorImagePath
         activeIndicatorColor = DefaultValues.activeIndicatorColor
+        dividerImagePath = DefaultValues.dividerImagePath
+        leftDividerImagePath = DefaultValues.leftDividerImagePath
+        rightDividerImagePath = DefaultValues.rightDividerImagePath
+        mirrorsLeftDividerOnRight = DefaultValues.mirrorsLeftDividerOnRight
         appIconOverrides = DefaultValues.appIconOverrides
+        trashIconOverrides = DefaultValues.trashIconOverrides
         hiddenAppBundleIdentifiers = DefaultValues.hiddenAppBundleIdentifiers
         showsGroupedOpenedAppsInDock = DefaultValues.showsGroupedOpenedAppsInDock
         enablesLaunchpadOverlay = DefaultValues.enablesLaunchpadOverlay
         launchpadOverlayTransparency = DefaultValues.launchpadOverlayTransparency
         launchpadGridColumnCount = DefaultValues.launchpadGridColumnCount
+        launchpadGridRowCount = DefaultValues.launchpadGridRowCount
         launchpadShortcut = DefaultValues.launchpadShortcut
         enablesWindowSwitcher = DefaultValues.enablesWindowSwitcher
         windowSwitcherShortcut = DefaultValues.windowSwitcherShortcut
@@ -1779,6 +1994,15 @@ final class DockyPreferences: ObservableObject {
         defaults.set(data, forKey: Keys.appIconOverrides)
     }
 
+    private func persistTrashIconOverrides(_ overrides: [TrashIconOverride]) {
+        guard let data = try? encoder.encode(overrides) else {
+            defaults.removeObject(forKey: Keys.trashIconOverrides)
+            return
+        }
+
+        defaults.set(data, forKey: Keys.trashIconOverrides)
+    }
+
     private func persistWindowSwitcherShortcut(_ shortcut: KeyboardShortcut) {
         guard let data = try? encoder.encode(shortcut) else {
             defaults.removeObject(forKey: Keys.windowSwitcherShortcut)
@@ -1827,6 +2051,14 @@ final class DockyPreferences: ObservableObject {
         }
 
         return try? JSONDecoder().decode([AppIconOverride].self, from: data)
+    }
+
+    private static func decodeTrashIconOverrides(from data: Data?) -> [TrashIconOverride]? {
+        guard let data else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode([TrashIconOverride].self, from: data)
     }
 
     private static func decodeKeyboardShortcut(from data: Data?) -> KeyboardShortcut? {

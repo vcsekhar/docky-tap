@@ -38,6 +38,10 @@ struct TileContainerView: View {
         GeometryReader { proxy in
             overflowWrappedContent(in: proxy)
             .onPreferenceChange(TileFramePreferenceKey.self) { tileFrames = $0 }
+            .onAppear { layout.setTileCanvasFrame(proxy.frame(in: .global)) }
+            .onChange(of: proxy.frame(in: .global)) { _, frame in
+                layout.setTileCanvasFrame(frame)
+            }
             .onChange(of: dockDrag.cursorLocation) { _, location in
                 updateExternalDragDestinationIndex(at: location)
                 updatePaletteDropDestinationFromCursor(at: location)

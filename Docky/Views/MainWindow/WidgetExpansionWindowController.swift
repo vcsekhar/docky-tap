@@ -97,7 +97,8 @@ final class WidgetExpansionWindowController: NSWindowController, ObservableObjec
         }
 
         let finalOrigin = frameOrigin(for: windowSize, sourceFrame: sourceFrame)
-        let initialOrigin = CGPoint(x: finalOrigin.x, y: finalOrigin.y - Self.slideOffset)
+        let slide = slideOffsetVector()
+        let initialOrigin = CGPoint(x: finalOrigin.x + slide.x, y: finalOrigin.y + slide.y)
         let finalFrame = CGRect(origin: finalOrigin, size: windowSize)
         let initialFrame = CGRect(origin: initialOrigin, size: windowSize)
 
@@ -129,7 +130,8 @@ final class WidgetExpansionWindowController: NSWindowController, ObservableObjec
         }
 
         let currentFrame = window.frame
-        let targetFrame = currentFrame.offsetBy(dx: 0, dy: -Self.slideOffset)
+        let slide = slideOffsetVector()
+        let targetFrame = currentFrame.offsetBy(dx: slide.x, dy: slide.y)
 
         dismissAnimationTask?.cancel()
         dismissAnimationTask = Task { @MainActor in
@@ -191,21 +193,77 @@ final class WidgetExpansionWindowController: NSWindowController, ObservableObjec
         isHoldingDockVisible = false
     }
 
-    private func frameOrigin(for size: CGSize, sourceFrame: CGRect) -> CGPoint {
+    private func frameOrigin(for size: CGSize, sourceFrame originalSourceFrame: CGRect) -> CGPoint {
+        let sourceFrame = convertToScreen(originalSourceFrame)
         let screen = NSScreen.screens.first { $0.visibleFrame.intersects(sourceFrame) } ?? NSScreen.main
         guard let visibleFrame = screen?.visibleFrame else {
             return CGPoint(x: sourceFrame.midX - size.width / 2, y: sourceFrame.maxY)
         }
 
-        let proposedY = sourceFrame.maxY
-        let y = proposedY + size.height <= visibleFrame.maxY
-            ? proposedY
-            : max(visibleFrame.minY, sourceFrame.minY - size.height)
-        let x = min(
-            max(sourceFrame.midX - size.width / 2, visibleFrame.minX),
-            visibleFrame.maxX - size.width
-        )
+        switch dockEdge {
+        case .maxY:
+            let proposedY = sourceFrame.maxY
+            let y = proposedY + size.height <= visibleFrame.maxY
+                ? proposedY
+                : max(visibleFrame.minY, sourceFrame.minY - size.height)
+            let x = clamp(sourceFrame.midX - size.width / 2, lower: visibleFrame.minX, upper: visibleFrame.maxX - size.width)
+            return CGPoint(x: x, y: y)
+        case .minY:
+            let proposedY = sourceFrame.minY - size.height
+            let y = proposedY >= visibleFrame.minY ? proposedY : sourceFrame.maxY
+            let x = clamp(sourceFrame.midX - size.width / 2, lower: visibleFrame.minX, upper: visibleFrame.maxX - size.width)
+            return CGPoint(x: x, y: y)
+        case .maxX:
+            let proposedX = sourceFrame.maxX
+            let x = proposedX + size.width <= visibleFrame.maxX
+                ? proposedX
+                : max(visibleFrame.minX, sourceFrame.minX - size.width)
+            let y = clamp(sourceFrame.midY - size.height / 2, lower: visibleFrame.minY, upper: visibleFrame.maxY - size.height)
+            return CGPoint(x: x, y: y)
+        case .minX:
+            let proposedX = sourceFrame.minX - size.width
+            let x = proposedX >= visibleFrame.minX ? proposedX : sourceFrame.maxX
+            let y = clamp(sourceFrame.midY - size.height / 2, lower: visibleFrame.minY, upper: visibleFrame.maxY - size.height)
+            return CGPoint(x: x, y: y)
+        @unknown default:
+            return CGPoint(x: sourceFrame.midX - size.width / 2, y: sourceFrame.maxY)
+        }
+    }
 
-        return CGPoint(x: x, y: y)
+    private func clamp(_ value: CGFloat, lower: CGFloat, upper: CGFloat) -> CGFloat {
+        min(max(value, lower), upper)
+    }
+
+    private func convertToScreen(_ frame: CGRect) -> CGRect {
+        guard let dockFrame = NSApp.windows.compactMap({ $0 as? MainWindow }).first?.frame else {
+            return frame
+        }
+        return CGRect(
+            x: dockFrame.minX + frame.minX,
+            y: dockFrame.maxY - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
+    private var dockEdge: NSRectEdge {
+        let prefs = DockyPreferences.shared
+        let settings = DockSettingsService.shared
+        switch prefs.windowPosition.resolved(systemOrientation: settings.orientation) {
+        case .top: return .minY
+        case .bottom: return .maxY
+        case .left: return .maxX
+        case .right: return .minX
+        }
+    }
+
+    private func slideOffsetVector() -> CGPoint {
+        switch dockEdge {
+        case .maxY: return CGPoint(x: 0, y: -Self.slideOffset)
+        case .minY: return CGPoint(x: 0, y: Self.slideOffset)
+        case .maxX: return CGPoint(x: -Self.slideOffset, y: 0)
+        case .minX: return CGPoint(x: Self.slideOffset, y: 0)
+        @unknown default: return CGPoint(x: 0, y: -Self.slideOffset)
+        }
     }
 }

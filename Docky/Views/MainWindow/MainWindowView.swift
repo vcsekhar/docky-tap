@@ -62,19 +62,37 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private func backgroundFill(cornerRadius: CGFloat) -> some View {
+        let resolvedPosition = preferences.windowPosition.resolved(systemOrientation: dockSettings.orientation)
+        let rotated = resolvedPosition.isVertical
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(Color.clear)
-            .overlay {
+            .background {
                 if let backgroundImage = resolvedBackgroundImage {
-                    Image(nsImage: backgroundImage)
-                        .resizable()
-                        .scaledToFill()
+                    GeometryReader { proxy in
+                        Image(nsImage: backgroundImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(
+                                width: rotated ? proxy.size.height : proxy.size.width,
+                                height: rotated ? proxy.size.width : proxy.size.height
+                            )
+                            .rotationEffect(.degrees(backgroundImageRotationDegrees(for: resolvedPosition)))
+                            .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                    }
                 } else {
                     Color(nsColor: preferences.effectiveWindowTintColor)
                         .opacity(preferences.effectiveWindowTintOpacity)
                 }
             }
             .clipped()
+    }
+
+    private func backgroundImageRotationDegrees(for position: ResolvedDockWindowPosition) -> Double {
+        switch position {
+        case .left: 90
+        case .right: -90
+        case .top, .bottom: 0
+        }
     }
 
     private var borderGradient: LinearGradient {

@@ -93,6 +93,15 @@ struct AppFolderTileView: View {
         tile.contentViewMode == .inline && store.isInlineAppFolderExpanded(folderID: tile.identifier)
     }
 
+    private var inlineExpandedChevronName: String {
+        switch position {
+        case .left, .right, .top:
+            "chevron.up"
+        case .bottom:
+            "chevron.left"
+        }
+    }
+
     var body: some View {
         #if DEBUG
         let _ = Self._printChanges()
@@ -145,7 +154,7 @@ struct AppFolderTileView: View {
                 .fill(.primary.opacity(0.08))
                 .padding(inset)
 
-            Image(systemName: "chevron.left")
+            Image(systemName: inlineExpandedChevronName)
                 .font(.system(size: chevronSize, weight: .semibold))
                 .foregroundStyle(.primary.opacity(0.9))
         }

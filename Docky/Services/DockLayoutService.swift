@@ -7,12 +7,19 @@ import Combine
 import CoreGraphics
 import Foundation
 
+enum DockDividerPositionClass {
+    case left
+    case center
+    case right
+}
+
 final class DockLayoutService: ObservableObject {
     static let shared = DockLayoutService()
 
     @Published private(set) var contentScale: CGFloat = 1
     @Published private(set) var compactsWidgetsForOverflow = false
     @Published private(set) var chromeSize: CGSize = .zero
+    @Published private(set) var tileCanvasFrame: CGRect = .zero
 
     private init() {}
 
@@ -32,6 +39,16 @@ final class DockLayoutService: ObservableObject {
             return
         }
         chromeSize = size
+    }
+
+    func setTileCanvasFrame(_ frame: CGRect) {
+        guard abs(tileCanvasFrame.minX - frame.minX) > 0.0001
+            || abs(tileCanvasFrame.minY - frame.minY) > 0.0001
+            || abs(tileCanvasFrame.width - frame.width) > 0.0001
+            || abs(tileCanvasFrame.height - frame.height) > 0.0001 else {
+            return
+        }
+        tileCanvasFrame = frame
     }
 
     func scaled(_ value: CGFloat) -> CGFloat {

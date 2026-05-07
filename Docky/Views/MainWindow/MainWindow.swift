@@ -584,7 +584,9 @@ final class MainWindow: NSPanel {
             compactWidgets: compactsWidgetsForOverflow,
             edgePadding: TileContainerView.edgePadding * contentScale
         )
-        let displayedChromeAxisLength = min(axisLength(of: displayedContentSize, position: position), availableAxisLength)
+        let displayedChromeAxisLength = preferences.windowAxisSizing == .fullAxis
+            ? availableAxisLength
+            : min(axisLength(of: displayedContentSize, position: position), availableAxisLength)
         layout.setChromeSize(displayedChromeSize(
             for: displayedContentSize,
             displayedAxisLength: displayedChromeAxisLength,

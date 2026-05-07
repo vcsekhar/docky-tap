@@ -90,6 +90,81 @@ struct AppearanceSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, 4)
+
+            customDividerImageControls
+        }
+    }
+
+    @ViewBuilder
+    private var customDividerImageControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Custom Divider Image")
+                .font(.headline)
+
+            dividerImageRow(
+                title: "Center",
+                path: preferences.dividerImagePath,
+                onChoose: { chooseDividerImage(slot: .global) },
+                onClear: { preferences.dividerImagePath = nil }
+            )
+
+            Divider()
+
+            dividerImageRow(
+                title: "Left Side",
+                path: preferences.leftDividerImagePath,
+                onChoose: { chooseDividerImage(slot: .left) },
+                onClear: { preferences.leftDividerImagePath = nil }
+            )
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Right Side")
+                    Spacer()
+                    Toggle("Mirror Left Side", isOn: $preferences.mirrorsLeftDividerOnRight)
+                        .toggleStyle(.switch)
+                }
+
+                if !preferences.mirrorsLeftDividerOnRight {
+                    dividerImageRow(
+                        title: nil,
+                        path: preferences.rightDividerImagePath,
+                        onChoose: { chooseDividerImage(slot: .right) },
+                        onClear: { preferences.rightDividerImagePath = nil }
+                    )
+                }
+            }
+
+            Text("Use a custom image for dividers. The center image applies to dividers near the middle of the dock; the left and right overrides target dividers near each end. Mirror reuses the left image flipped on the right side. In vertical docks the image is rotated 90° to follow the dock's axis.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func dividerImageRow(title: String?, path: String?, onChoose: @escaping () -> Void, onClear: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let title {
+                Text(title)
+            }
+
+            HStack {
+                Button("Choose Image...", action: onChoose)
+
+                if path != nil {
+                    Button("Clear", action: onClear)
+                }
+
+                if let name = path.flatMap({ $0.isEmpty ? nil : URL(fileURLWithPath: $0).lastPathComponent }) {
+                    Text(name)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
         }
     }
 
@@ -475,5 +550,31 @@ struct AppearanceSettingsView: View {
         }
 
         preferences.windowBackgroundImagePath = url.path
+    }
+
+    private enum DividerImageSlot {
+        case global, left, right
+    }
+
+    private func chooseDividerImage(slot: DividerImageSlot) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = "Choose Image"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        switch slot {
+        case .global:
+            preferences.dividerImagePath = url.path
+        case .left:
+            preferences.leftDividerImagePath = url.path
+        case .right:
+            preferences.rightDividerImagePath = url.path
+        }
     }
 }
