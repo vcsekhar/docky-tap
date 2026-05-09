@@ -513,9 +513,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         submenu.addItem(.separator())
 
         let candidates: [(major: Int, minor: Int, name: String)] = [
-            (13, 0, "Ventura"),
-            (13, 5, "Ventura"),
             (14, 0, "Sonoma"),
+            (14, 6, "Sonoma"),
             (15, 0, "Sequoia"),
             (26, 0, "Tahoe"),
         ]

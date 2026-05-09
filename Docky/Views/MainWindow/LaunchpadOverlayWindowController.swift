@@ -286,56 +286,41 @@ private struct LaunchpadOverlayView: View {
                         overlay.dismiss()
                     }
 
-                if FeatureGate.shared.isAvailable(.launchpadPaging), #available(macOS 14.0, *) {
-                    ScrollViewReader { scrollProxy in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 0) {
-                                ForEach(pages.indices, id: \.self) { pageIndex in
-                                    pageGrid(
-                                        pageEntries: pages[pageIndex],
-                                        cellWidth: cellWidth,
-                                        cellHeight: cellHeight,
-                                        pageWidth: proxy.size.width,
-                                        columns: pageColumns,
-                                        columnSpacing: scaledColumnSpacing,
-                                        rowSpacing: scaledRowSpacing,
-                                        horizontalInset: scaledHorizontalInset
-                                    )
-                                    .id("page-\(pageIndex)")
-                                }
-                            }
-                            .launchpadScrollTargetLayoutCompat()
-                        }
-                        .launchpadHorizontalPagingCompat(visiblePageID: $visiblePageID)
-                        .padding(.top, topInset)
-                        .padding(.bottom, bottomInset)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .onChange(of: selectedEntryID) { selection in
-                            guard let selection,
-                                  let pageIndex = pageIndex(for: selection, in: pages) else { return }
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                scrollProxy.scrollTo("page-\(pageIndex)", anchor: .leading)
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 0) {
+                            ForEach(pages.indices, id: \.self) { pageIndex in
+                                pageGrid(
+                                    pageEntries: pages[pageIndex],
+                                    cellWidth: cellWidth,
+                                    cellHeight: cellHeight,
+                                    pageWidth: proxy.size.width,
+                                    columns: pageColumns,
+                                    columnSpacing: scaledColumnSpacing,
+                                    rowSpacing: scaledRowSpacing,
+                                    horizontalInset: scaledHorizontalInset
+                                )
+                                .id("page-\(pageIndex)")
                             }
                         }
-                        .onChange(of: filteredEntries.map(\.id)) { _ in
-                            synchronizeSelection()
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.paging)
+                    .scrollPosition(id: $visiblePageID, anchor: .leading)
+                    .scrollClipDisabled()
+                    .padding(.top, topInset)
+                    .padding(.bottom, bottomInset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onChange(of: selectedEntryID) { selection in
+                        guard let selection,
+                              let pageIndex = pageIndex(for: selection, in: pages) else { return }
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            scrollProxy.scrollTo("page-\(pageIndex)", anchor: .leading)
                         }
                     }
-                } else {
-                    // macOS 13: snap-to-page scroll APIs are macOS 14+, so
-                    // rather than a degraded free-scrolling horizontal layout
-                    // we render a single vertical grid with the same column
-                    // count and let the user scroll through all entries.
-                    verticalGrid(
-                        cellWidth: cellWidth,
-                        cellHeight: cellHeight,
-                        columns: pageColumns,
-                        columnSpacing: scaledColumnSpacing,
-                        rowSpacing: scaledRowSpacing,
-                        horizontalInset: scaledHorizontalInset,
-                        topInset: topInset,
-                        bottomInset: bottomInset
-                    )
+                    .onChange(of: filteredEntries.map(\.id)) { _ in
+                        synchronizeSelection()
+                    }
                 }
 
                 VStack {
@@ -345,10 +330,8 @@ private struct LaunchpadOverlayView: View {
 
                     Spacer()
 
-                    if FeatureGate.shared.isAvailable(.launchpadPaging), #available(macOS 14.0, *) {
-                        pageIndicator(pageCount: pages.count, currentIndex: currentPageIndex(in: pages))
-                            .padding(.bottom, 24)
-                    }
+                    pageIndicator(pageCount: pages.count, currentIndex: currentPageIndex(in: pages))
+                        .padding(.bottom, 24)
                 }
 
                 if let folder = expandedFolder {
@@ -415,68 +398,6 @@ private struct LaunchpadOverlayView: View {
                 .blur(radius: wallpaperBlurRadius, opaque: true)
                 .clipped()
                 .allowsHitTesting(false)
-        }
-    }
-
-    /// Single vertical grid used as the macOS 13 fallback for the paginated
-    /// horizontal layout. The `ScrollView` fills the full frame and the top
-    /// inset lives inside the scroll content, so as the user scrolls the
-    /// first rows pass behind the (translucent) search field overlay
-    /// instead of clipping at a hard top edge.
-    private func verticalGrid(
-        cellWidth: CGFloat,
-        cellHeight: CGFloat,
-        columns: Int,
-        columnSpacing: CGFloat,
-        rowSpacing: CGFloat,
-        horizontalInset: CGFloat,
-        topInset: CGFloat,
-        bottomInset: CGFloat
-    ) -> some View {
-        let gridColumns = Array(
-            repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing, alignment: .top),
-            count: columns
-        )
-
-        return ScrollViewReader { scrollProxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 0) {
-                    Spacer(minLength: horizontalInset)
-
-                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: rowSpacing) {
-                        ForEach(filteredEntries) { entry in
-                            entryCell(
-                                for: entry,
-                                cellSize: CGSize(width: cellWidth, height: cellHeight)
-                            )
-                            .frame(width: cellWidth, height: cellHeight)
-                            .id(entry.id)
-                        }
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-
-                    Spacer(minLength: horizontalInset)
-                }
-                .padding(.top, topInset)
-                .padding(.bottom, bottomInset)
-                // Same fall-through dismiss tint as `pageGrid`: empty grid
-                // area behind the cells routes taps to overlay.dismiss().
-                .background(
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { overlay.dismiss() }
-                )
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onChange(of: selectedEntryID) { selection in
-                guard let selection else { return }
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    scrollProxy.scrollTo(selection, anchor: .center)
-                }
-            }
-            .onChange(of: filteredEntries.map(\.id)) { _ in
-                synchronizeSelection()
-            }
         }
     }
 
@@ -1021,9 +942,11 @@ private struct ExpandedFolderOverlay: View {
                             .id("folder-page-\(index)")
                     }
                 }
-                .launchpadScrollTargetLayoutCompat()
+                .scrollTargetLayout()
             }
-            .launchpadHorizontalPagingCompat(visiblePageID: $visiblePageID)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $visiblePageID, anchor: .leading)
+            .scrollClipDisabled()
             .frame(height: gridHeight)
 
             // Only reserve indicator height when the folder actually
@@ -1146,34 +1069,3 @@ private struct LaunchpadOverlayKeyMonitor: NSViewRepresentable {
     }
 }
 
-// macOS 13 fallback: snap-to-page (`scrollTargetBehavior(.paging)`),
-// page-id binding (`scrollPosition`), and clip-disable were all introduced
-// in macOS 14 along with `scrollTargetLayout`. On 13 these helpers no-op
-// and the launchpad grid scrolls horizontally without page snapping —
-// page-indicator dots stop tracking position there but the apps remain
-// reachable. AppKit's `NSPageController` could fill that gap, but the
-// SwiftUI ↔ NSHostingController bridging adds more code than the
-// degraded-UX path is worth for the dwindling 13.x install base.
-
-private extension View {
-    @ViewBuilder
-    func launchpadScrollTargetLayoutCompat() -> some View {
-        if FeatureGate.shared.isAvailable(.launchpadPaging), #available(macOS 14.0, *) {
-            self.scrollTargetLayout()
-        } else {
-            self
-        }
-    }
-
-    @ViewBuilder
-    func launchpadHorizontalPagingCompat(visiblePageID: Binding<String?>) -> some View {
-        if FeatureGate.shared.isAvailable(.launchpadPaging), #available(macOS 14.0, *) {
-            self
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: visiblePageID, anchor: .leading)
-                .scrollClipDisabled()
-        } else {
-            self
-        }
-    }
-}

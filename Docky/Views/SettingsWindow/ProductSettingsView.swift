@@ -121,7 +121,7 @@ struct ProductSettingsView: View {
 
                 TextField("Email Address", text: $trialEmail)
                     .textFieldStyle(.roundedBorder)
-                    .modifier(EmailAddressContentTypeIfAvailable())
+                    .textContentType(.emailAddress)
                     .disabled(product.isStartingTrial)
 
                 if product.isStartingTrial {
@@ -169,16 +169,3 @@ struct ProductSettingsView: View {
     }
 }
 
-/// `UITextContentType.emailAddress` on macOS is gated behind 14+; on 13
-/// — or when the autofill content-type feature is force-disabled via
-/// `FeatureGate` — the text field works without the autofill hint.
-private struct EmailAddressContentTypeIfAvailable: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if FeatureGate.shared.isAvailable(.emailAutofillContentType), #available(macOS 14.0, *) {
-            content.textContentType(.emailAddress)
-        } else {
-            content
-        }
-    }
-}

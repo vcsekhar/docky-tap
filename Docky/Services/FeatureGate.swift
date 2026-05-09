@@ -55,22 +55,9 @@ enum DockyFeature: String, CaseIterable, Codable {
     /// `SCStreamConfiguration.captureMicrophone`.
     case streamMicrophoneCapture
 
-    // MARK: macOS 14+
-    /// SwiftUI scroll-target paging APIs powering Launchpad's
-    /// horizontal snap-to-page layout.
-    case launchpadPaging
-    /// `SCScreenshotManager.captureImage` for window thumbnails.
-    case screenshotManager
-    /// `SCStreamConfiguration.ignoreShadowsSingleWindow` and
-    /// `ignoreGlobalClipSingleWindow`.
-    case streamCaptureSingleWindow
-    /// `TextField.textContentType(.emailAddress)` on macOS — only
-    /// available from macOS 14 even though iOS has had it for years.
-    case emailAutofillContentType
-    /// EventKit `requestFullAccessToEvents` /
-    /// `requestFullAccessToReminders` (the post-14 split-permission
-    /// flow). Older systems use the deprecated `requestAccess(to:)`.
-    case eventKitFullAccessRequest
+    // (Previous macOS 14+ entries were removed when we lifted the
+    // deployment target to 14.0 — those APIs are now always-available
+    // and don't need a runtime gate.)
 
     /// Lowest macOS version that satisfies the gate. The
     /// `#available(macOS X.Y, *)` paired with each call site uses the
@@ -85,13 +72,6 @@ enum DockyFeature: String, CaseIterable, Codable {
 
         case .streamMicrophoneCapture:
             return OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0)
-
-        case .launchpadPaging,
-             .screenshotManager,
-             .streamCaptureSingleWindow,
-             .emailAutofillContentType,
-             .eventKitFullAccessRequest:
-            return OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0)
         }
     }
 }

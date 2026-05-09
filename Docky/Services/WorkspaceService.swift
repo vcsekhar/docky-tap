@@ -809,10 +809,8 @@ final class WorkspaceService: ObservableObject {
             }
             configuration.showsCursor = false
             configuration.scalesToFit = true
-            if FeatureGate.shared.isAvailable(.streamCaptureSingleWindow), #available(macOS 14.0, *) {
-                configuration.ignoreShadowsSingleWindow = true
-                configuration.ignoreGlobalClipSingleWindow = true
-            }
+            configuration.ignoreShadowsSingleWindow = true
+            configuration.ignoreGlobalClipSingleWindow = true
 
             let filter = SCContentFilter(desktopIndependentWindow: shareableWindow)
             let cgImage = try await captureImage(contentFilter: filter, configuration: configuration)
@@ -844,10 +842,8 @@ final class WorkspaceService: ObservableObject {
             }
             configuration.showsCursor = false
             configuration.scalesToFit = false
-            if FeatureGate.shared.isAvailable(.streamCaptureSingleWindow), #available(macOS 14.0, *) {
-                configuration.ignoreShadowsSingleWindow = true
-                configuration.ignoreGlobalClipSingleWindow = true
-            }
+            configuration.ignoreShadowsSingleWindow = true
+            configuration.ignoreGlobalClipSingleWindow = true
 
             let filter = SCContentFilter(desktopIndependentWindow: shareableWindow)
             let cgImage = try await captureImage(contentFilter: filter, configuration: configuration)
@@ -891,10 +887,8 @@ final class WorkspaceService: ObservableObject {
             }
             configuration.showsCursor = false
             configuration.scalesToFit = true
-            if FeatureGate.shared.isAvailable(.streamCaptureSingleWindow), #available(macOS 14.0, *) {
-                configuration.ignoreShadowsSingleWindow = true
-                configuration.ignoreGlobalClipSingleWindow = true
-            }
+            configuration.ignoreShadowsSingleWindow = true
+            configuration.ignoreGlobalClipSingleWindow = true
 
             let filter = SCContentFilter(desktopIndependentWindow: shareableWindow)
             let cgImage = try await captureImage(contentFilter: filter, configuration: configuration)
@@ -1019,19 +1013,6 @@ final class WorkspaceService: ObservableObject {
         contentFilter: SCContentFilter,
         configuration: SCStreamConfiguration
     ) async throws -> CGImage {
-        // SCScreenshotManager is macOS 14+. On 13 — or when the feature
-        // is force-disabled via `FeatureGate` — we throw and let the
-        // caller's catch turn the failure into "no preview"; minimized
-        // window previews still work because that path falls back to
-        // `CGWindowListCreateImage` first.
-        guard FeatureGate.shared.isAvailable(.screenshotManager),
-              #available(macOS 14.0, *) else {
-            throw NSError(
-                domain: "Docky.WindowPreview",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Screenshot capture requires macOS 14 or later."]
-            )
-        }
         return try await withCheckedThrowingContinuation { continuation in
             SCScreenshotManager.captureImage(contentFilter: contentFilter, configuration: configuration) { image, error in
                 if let error {
@@ -1119,10 +1100,8 @@ private final class LiveWindowPreviewSession: NSObject, SCStreamOutput {
         }
         configuration.showsCursor = false
         configuration.scalesToFit = false
-        if FeatureGate.shared.isAvailable(.streamCaptureSingleWindow), #available(macOS 14.0, *) {
-            configuration.ignoreShadowsSingleWindow = true
-            configuration.ignoreGlobalClipSingleWindow = true
-        }
+        configuration.ignoreShadowsSingleWindow = true
+        configuration.ignoreGlobalClipSingleWindow = true
 
         self.stream = SCStream(
             filter: SCContentFilter(desktopIndependentWindow: shareableWindow),
