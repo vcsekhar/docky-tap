@@ -24,7 +24,7 @@ struct FolderPopoverView: View {
     @State private var springLoadTask: Task<Void, Never>?
     private let subfolderSpringLoadDwell: TimeInterval = 0.7
 
-    private let maxGridColumnCount = 6
+    private let maxGridColumnCount = 8
     private let gridItemWidth: CGFloat = 144
     private let gridItemHeight: CGFloat = 158
     private let gridItemSpacing: CGFloat = 8
@@ -99,6 +99,7 @@ struct FolderPopoverView: View {
             }
         }
         .frame(width: popoverWidth, height: popoverHeight)
+        .background(.ultraThickMaterial)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
             moveDroppedFiles(providers: providers, into: currentEntry.url)
             return true
