@@ -94,11 +94,11 @@ struct DividerTileView: View {
             customImageDivider(nsImage: nsImage, mirrored: resolvedImage.mirrored)
         } else if position.isVertical {
             Rectangle()
-                .fill(.primary.opacity(0.2))
+                .fill(.primary)
                 .frame(height: 1)
         } else {
             Rectangle()
-                .fill(.primary.opacity(0.2))
+                .fill(.primary)
                 .frame(width: 1)
                 .padding(.vertical, lineInset)
         }
