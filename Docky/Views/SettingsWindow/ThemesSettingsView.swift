@@ -69,29 +69,30 @@ struct ThemesSettingsView: View {
             }
 
             Section {
-                HStack {
-                    Button {
-                        importTheme()
-                    } label: {
-                        Label("Import Theme…", systemImage: "square.and.arrow.down")
+                Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                    GridRow {
+                        themesActionButton(
+                            "Import Theme…",
+                            systemImage: "square.and.arrow.down",
+                            action: importTheme
+                        )
+                        themesActionButton(
+                            "Export to Theme…",
+                            systemImage: "square.and.arrow.up",
+                            action: exportTheme
+                        )
                     }
-
-                    Button {
-                        exportTheme()
-                    } label: {
-                        Label("Export to Theme…", systemImage: "square.and.arrow.up")
-                    }
-
-                    Button {
-                        revealThemesFolder()
-                    } label: {
-                        Label("Reveal Themes Folder", systemImage: "folder")
-                    }
-
-                    Button {
-                        manager.refreshInstalled()
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                    GridRow {
+                        themesActionButton(
+                            "Reveal Themes Folder",
+                            systemImage: "folder",
+                            action: revealThemesFolder
+                        )
+                        themesActionButton(
+                            "Refresh",
+                            systemImage: "arrow.clockwise",
+                            action: manager.refreshInstalled
+                        )
                     }
                 }
             }
@@ -280,6 +281,25 @@ struct ThemesSettingsView: View {
         }
         return types
     }()
+
+    /// Grid cell used for every Themes action button. Mirrors the
+    /// onboarding's `.bordered` + `.large` styling so on macOS 26+
+    /// each cell picks up the system Liquid Glass material for free,
+    /// and stretches to fill its column for a uniform two-column row.
+    @ViewBuilder
+    private func themesActionButton(
+        _ title: LocalizedStringKey,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+    }
 }
 
 /// Square color/image preview chip used in the installed-themes list.
