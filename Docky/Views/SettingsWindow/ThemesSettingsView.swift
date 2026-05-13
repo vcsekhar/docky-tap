@@ -164,6 +164,14 @@ struct ThemesSettingsView: View {
                             .background(.tint, in: Capsule())
                             .foregroundStyle(.white)
                     }
+                    if theme.isBundled {
+                        Text("Built-in")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.18), in: Capsule())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let author = theme.manifest.author, !author.isEmpty {
                     Text("by \(author)")
@@ -189,13 +197,15 @@ struct ThemesSettingsView: View {
                 }
             }
 
-            Button(role: .destructive) {
-                themeIDPendingDeletion = theme.manifest.id
-            } label: {
-                Image(systemName: "trash")
+            if !theme.isBundled {
+                Button(role: .destructive) {
+                    themeIDPendingDeletion = theme.manifest.id
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete this theme")
             }
-            .buttonStyle(.borderless)
-            .help("Delete this theme")
         }
     }
 

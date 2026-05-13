@@ -58,6 +58,18 @@ import Observation
         refreshInstalled()
     }
 
+    /// Read-only directory inside the app bundle holding themes
+    /// shipped with Docky. Populated by the "Copy Bundled Themes"
+    /// build phase from `BundledThemes/` at the repo root. Returns
+    /// `nil` when the directory doesn't exist (e.g. running from a
+    /// debug build without bundled themes staged).
+    private static var bundledThemesDirectoryURL: URL? {
+        guard let resourceURL = Bundle.main.resourceURL else { return nil }
+        let url = resourceURL.appending(path: "Themes", directoryHint: .isDirectory)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
     // MARK: - Public surface
 
     /// On-disk location where installed theme bundles live.
@@ -158,11 +170,24 @@ import Observation
         defaults.removeObject(forKey: Keys.activeThemeID)
     }
 
-    /// Re-scans the themes directory and rebuilds `installedThemes`.
-    /// Cheap enough to call on launch and after user-initiated
-    /// install/uninstall actions.
+    /// Re-scans the bundled + user themes directories and rebuilds
+    /// `installedThemes`. Bundled themes load first so a user-supplied
+    /// theme with the same id transparently overrides the built-in
+    /// (last write wins in the merge step).
     func refreshInstalled() {
-        installedThemes = Self.scanInstalledThemes(at: themesDirectoryURL, decoder: decoder)
+        var merged: [String: InstalledTheme] = [:]
+
+        if let bundledURL = Self.bundledThemesDirectoryURL {
+            for (id, theme) in Self.scanInstalledThemes(at: bundledURL, decoder: decoder, isBundled: true) {
+                merged[id] = theme
+            }
+        }
+
+        for (id, theme) in Self.scanInstalledThemes(at: themesDirectoryURL, decoder: decoder, isBundled: false) {
+            merged[id] = theme
+        }
+
+        installedThemes = merged
 
         // If the active id no longer maps to an installed theme,
         // forget it so reads fall back to user/default values.
@@ -171,16 +196,19 @@ import Observation
         }
     }
 
-    /// Removes an installed theme. If it is the active theme, the
-    /// active selection is cleared first so reads don't briefly point
-    /// at a missing bundle.
+    /// Removes the user-installed copy of a theme. Built-in (bundled)
+    /// themes are read-only and silently rejected — the caller's UI
+    /// should never offer deletion for `isBundled` entries.
+    ///
+    /// If a bundled theme with the same id exists, deleting the user
+    /// copy lets activation fall through to the built-in (the post-
+    /// delete `refreshInstalled` re-merges and `activeThemeID` is
+    /// preserved). When no bundled fallback exists, `refreshInstalled`
+    /// clears the active selection itself.
     func deleteTheme(id: String) throws {
-        guard let installed = installedThemes[id] else { return }
-        if activeThemeID == id {
-            clearActive()
-        }
+        guard let installed = installedThemes[id], !installed.isBundled else { return }
         try fileManager.removeItem(at: installed.bundleURL)
-        installedThemes.removeValue(forKey: id)
+        refreshInstalled()
     }
 
     /// Imports a `.dockytheme` (zip) bundle from disk. The zip is
@@ -503,7 +531,8 @@ import Observation
 
     private static func scanInstalledThemes(
         at directory: URL,
-        decoder: JSONDecoder
+        decoder: JSONDecoder,
+        isBundled: Bool
     ) -> [String: InstalledTheme] {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
@@ -528,17 +557,24 @@ import Observation
             // Trust the manifest id over the folder name so a renamed
             // folder still resolves consistently. Collisions: last one
             // wins; harmless because the user can rename and re-scan.
-            result[manifest.id] = InstalledTheme(manifest: manifest, bundleURL: entry)
+            result[manifest.id] = InstalledTheme(
+                manifest: manifest,
+                bundleURL: entry,
+                isBundled: isBundled
+            )
         }
         return result
     }
 }
 
 /// One installed theme on disk: parsed manifest plus the bundle
-/// directory that asset paths resolve against.
+/// directory that asset paths resolve against. `isBundled == true`
+/// for themes shipped inside the app bundle (read-only); the UI
+/// hides destructive actions for those entries.
 struct InstalledTheme: Equatable {
     let manifest: ThemeManifest
     let bundleURL: URL
+    let isBundled: Bool
 
     /// Optional `cover_image.png` (or `.jpg`/`.jpeg`) at the bundle
     /// root. Used by the Themes settings pane as a rich preview.

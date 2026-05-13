@@ -127,6 +127,7 @@
 				11051E022F929079005CE09D /* Embed Frameworks */,
 				D0C1000D2FA400000000000D /* Embed Watchdog */,
 				D0C1000F2FA400000000000F /* Bump CFBundleVersion (Release Only) */,
+				D0C10010BBBBBBBB00000001 /* Copy Bundled Themes */,
 				8C2157CA1EC44443B69BF4BB /* Upload Debug Symbols to Sentry */,
 			);
 			buildRules = (
@@ -229,6 +230,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		D0C10010BBBBBBBB00000001 /* Copy Bundled Themes */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Bundled Themes";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Mirror BundledThemes/ into the app's Resources/Themes/.\n# Folder-of-folders layout (not declared as folder references in\n# pbxproj) means we copy at build time so the nested\n# <theme-id>/theme.json + assets/*.png hierarchy survives.\n#\n# `--norsrc --noextattr --noacl` keeps codesign happy when the\n# source files came from a download that carried Finder metadata\n# (com.apple.quarantine, resource forks). Without these flags the\n# eventual CodeSign step would error with \"resource fork, Finder\n# information, or similar detritus not allowed\".\nset -e\nSRC=\"${SRCROOT}/BundledThemes\"\nDEST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Themes\"\n\nif [ ! -d \"$SRC\" ]; then\n  echo \"note: no BundledThemes directory at $SRC; skipping\"\n  exit 0\nfi\n\nrm -rf \"$DEST\"\nmkdir -p \"$DEST\"\nditto --norsrc --noextattr --noacl \"$SRC/\" \"$DEST/\"\nxattr -cr \"$DEST\"\necho \"note: copied bundled themes to $DEST\"\n";
+		};
 		8C2157CA1EC44443B69BF4BB /* Upload Debug Symbols to Sentry */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
