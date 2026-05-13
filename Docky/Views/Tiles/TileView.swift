@@ -550,7 +550,8 @@ struct TileView: View {
                     TileTooltipPopoverPresenter(
                         title: tooltipTitle,
                         isPresented: isTooltipPresented,
-                        preferredEdge: inwardPopoverEdge
+                        preferredEdge: inwardPopoverEdge,
+                        repositionKey: effectiveTileSize
                     )
                     .allowsHitTesting(false)
                 }
@@ -1970,6 +1971,12 @@ private struct TileTooltipPopoverPresenter: NSViewRepresentable {
     let title: String
     let isPresented: Bool
     let preferredEdge: NSRectEdge
+    /// Changes whenever the anchor view's bounds change (e.g., magnification
+    /// reshaping the tile under the cursor). Forces `updateNSView` to fire
+    /// so the popover can resync `positioningRect` to the new bounds —
+    /// otherwise it stays pinned to the resting bounds captured at show
+    /// time and ends up under the magnified icon.
+    let repositionKey: CGFloat
 
     func makeCoordinator() -> Coordinator {
         Coordinator(title: title, preferredEdge: preferredEdge)
@@ -2018,9 +2025,13 @@ private struct TileTooltipPopoverPresenter: NSViewRepresentable {
         }
 
         func show(relativeTo view: NSView) {
-            guard view.window != nil, !popover.isShown else { return }
+            guard view.window != nil else { return }
             let anchorRect = anchorRect(in: view.bounds)
-            popover.show(relativeTo: anchorRect, of: view, preferredEdge: preferredEdge)
+            if popover.isShown {
+                popover.positioningRect = anchorRect
+            } else {
+                popover.show(relativeTo: anchorRect, of: view, preferredEdge: preferredEdge)
+            }
         }
 
         func close() {

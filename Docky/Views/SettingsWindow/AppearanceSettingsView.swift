@@ -257,6 +257,18 @@ struct AppearanceSettingsView: View {
         .padding(.vertical, 4)
     }
 
+    private var alphaBadge: some View {
+        Text("ALPHA")
+            .font(.system(size: 9, weight: .bold))
+            .tracking(0.5)
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.orange.opacity(0.15), in: Capsule())
+            .overlay(Capsule().stroke(.orange.opacity(0.4), lineWidth: 0.5))
+            .accessibilityLabel("Alpha feature")
+    }
+
     @ViewBuilder
     private func sliderRow(
         title: String,
@@ -444,8 +456,13 @@ struct AppearanceSettingsView: View {
             .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 8) {
-                Toggle("Magnification", isOn: systemDockMagnificationBinding)
-                    .font(.headline)
+                Toggle(isOn: systemDockMagnificationBinding) {
+                    HStack(spacing: 8) {
+                        Text("Magnification")
+                        alphaBadge
+                    }
+                }
+                .font(.headline)
 
                 if dockSettings.magnification {
                     HStack {
@@ -460,7 +477,7 @@ struct AppearanceSettingsView: View {
                     }
                 }
 
-                Text("Tiles near the pointer grow toward the magnified size and smoothly fall off with distance.")
+                Text("Tiles near the pointer grow toward the magnified size and smoothly fall off with distance. Alpha: known issues with certain tile types and during reorder.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
