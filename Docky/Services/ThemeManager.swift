@@ -255,6 +255,167 @@ import Observation
         return id.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
+    /// Lowercases the input, replaces whitespace with dashes, and
+    /// strips characters that wouldn't pass `isValidThemeID`. Returns
+    /// `nil` when no valid characters remain.
+    static func slugify(_ raw: String) -> String? {
+        let lowered = raw.lowercased()
+        var result = ""
+        var lastWasDash = false
+        for scalar in lowered.unicodeScalars {
+            if (scalar >= "a" && scalar <= "z") || (scalar >= "0" && scalar <= "9") {
+                result.append(Character(scalar))
+                lastWasDash = false
+            } else if scalar == "_" || scalar == "." || scalar == "-" {
+                result.append(Character(scalar))
+                lastWasDash = scalar == "-"
+            } else if scalar == " " || scalar == "\t" {
+                if !lastWasDash {
+                    result.append("-")
+                    lastWasDash = true
+                }
+            }
+            // Any other character is dropped.
+        }
+        let trimmed = result.trimmingCharacters(in: CharacterSet(charactersIn: "-._"))
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    // MARK: - Export
+
+    /// Exports the user's current effective appearance to a
+    /// `.dockytheme` zip at `destinationURL`. The on-disk archive
+    /// contains a `theme.json` manifest plus every referenced image
+    /// asset, with manifest paths rewritten to relative `assets/...`
+    /// references so the bundle is portable.
+    ///
+    /// `name` is shown in the Themes pane and used to derive the
+    /// manifest id (slugified). Asset files are deduplicated by
+    /// source URL so a divider image that resolves to the same file
+    /// for left/right/center is copied only once.
+    @discardableResult
+    func exportCurrentAppearance(name: String, to destinationURL: URL) throws -> URL {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { throw ThemeExportError.invalidName(name) }
+        guard let id = Self.slugify(trimmedName), Self.isValidThemeID(id) else {
+            throw ThemeExportError.invalidName(name)
+        }
+
+        let staging = fileManager.temporaryDirectory
+            .appending(path: "docky-theme-export-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: staging) }
+
+        let bundleDir = staging.appending(path: id, directoryHint: .isDirectory)
+        let assetsDir = bundleDir.appending(path: "assets", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+
+        let copier = AssetCopier(assetsDir: assetsDir)
+        let manifest = Self.buildExportManifest(id: id, name: trimmedName, copier: copier)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let manifestData = try encoder.encode(manifest)
+        try manifestData.write(
+            to: bundleDir.appending(path: "theme.json", directoryHint: .notDirectory),
+            options: .atomic
+        )
+
+        let stagedZip = staging.appending(path: "\(id).dockytheme", directoryHint: .notDirectory)
+        try Self.createZip(of: bundleDir, at: stagedZip)
+
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.copyItem(at: stagedZip, to: destinationURL)
+        return destinationURL
+    }
+
+    private static func buildExportManifest(
+        id: String,
+        name: String,
+        copier: AssetCopier
+    ) -> ThemeManifest {
+        let prefs = DockyPreferences.shared
+
+        let backgroundAsset = copier.copyIfPresent(prefs.effectiveWindowBackgroundImageURL)
+        let indicatorAsset = copier.copyIfPresent(prefs.effectiveActiveIndicatorImageURL)
+        let centerDividerAsset = copier.copyIfPresent(prefs.effectiveDividerImageURL)
+        let leftDividerAsset = copier.copyIfPresent(prefs.effectiveLeftDividerImageURL)
+        let rightDividerAsset = copier.copyIfPresent(prefs.effectiveRightDividerImageURL)
+
+        let window = ThemeWindow(
+            clipShape: prefs.effectiveWindowClipShape.rawValue,
+            cornerRadius: prefs.effectiveWindowCornerRadius,
+            backgroundImage: backgroundAsset,
+            backgroundImageMode: prefs.effectiveWindowBackgroundImageMode.rawValue,
+            tintColor: prefs.explicitWindowTintColor,
+            tintOpacity: prefs.effectiveWindowTintOpacity
+        )
+
+        let divider = ThemeDivider(
+            left: leftDividerAsset,
+            right: rightDividerAsset,
+            center: centerDividerAsset,
+            mirrorLeftOnRight: prefs.effectiveMirrorsLeftDividerOnRight,
+            paddingFraction: prefs.effectiveDividerPaddingFraction,
+            offset: prefs.effectiveDividerOffset,
+            imageScale: prefs.effectiveDividerImageScale
+        )
+
+        let indicators = ThemeIndicators(
+            shape: prefs.effectiveActiveIndicatorShape.rawValue,
+            image: indicatorAsset,
+            color: prefs.explicitActiveIndicatorColor,
+            offset: prefs.effectiveActiveIndicatorOffset,
+            scale: prefs.effectiveActiveIndicatorScale,
+            divider: divider
+        )
+
+        let appearance = ThemeAppearance(
+            disablesGlassLook: prefs.effectiveDisablesGlassLook,
+            tile: ThemeTile(
+                clipShape: prefs.effectiveTileClipShape.rawValue,
+                verticalPadding: prefs.effectiveTileVerticalPadding,
+                spacing: prefs.effectiveTileSpacing
+            ),
+            window: window,
+            indicators: indicators
+        )
+
+        return ThemeManifest(
+            schemaVersion: 1,
+            id: id,
+            name: name,
+            author: NSFullUserName(),
+            version: "1.0.0",
+            description: nil,
+            appearance: appearance
+        )
+    }
+
+    private static func createZip(of sourceDirectory: URL, at destination: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = [
+            "-c", "-k", "--keepParent",
+            sourceDirectory.path,
+            destination.path
+        ]
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let stderr = String(
+                data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? ""
+            throw ThemeExportError.archiveFailed(status: process.terminationStatus, stderr: stderr)
+        }
+    }
+
     // MARK: - Internals
 
     private func ensureThemesDirectoryExists() {
@@ -309,6 +470,70 @@ import Observation
 struct InstalledTheme: Equatable {
     let manifest: ThemeManifest
     let bundleURL: URL
+}
+
+/// Stages copies of referenced image assets into an export bundle's
+/// `assets/` directory, deduping by source URL so an image referenced
+/// from multiple appearance slots (e.g. a divider shared by left and
+/// right) is copied only once. Returns the path relative to the
+/// bundle root (`"assets/<name>"`) for use in the exported manifest.
+private final class AssetCopier {
+    private let assetsDir: URL
+    private let fileManager = FileManager.default
+    private var copiedRelativePaths: [URL: String] = [:]
+    private var usedNames: Set<String> = []
+
+    init(assetsDir: URL) {
+        self.assetsDir = assetsDir
+    }
+
+    func copyIfPresent(_ sourceURL: URL?) -> String? {
+        guard let sourceURL else { return nil }
+        if let existing = copiedRelativePaths[sourceURL] { return existing }
+
+        let destination = uniqueDestination(for: sourceURL)
+        do {
+            try fileManager.copyItem(at: sourceURL, to: destination)
+        } catch {
+            return nil
+        }
+        let relative = "assets/\(destination.lastPathComponent)"
+        copiedRelativePaths[sourceURL] = relative
+        usedNames.insert(destination.lastPathComponent)
+        return relative
+    }
+
+    private func uniqueDestination(for sourceURL: URL) -> URL {
+        let originalName = sourceURL.lastPathComponent
+        if !usedNames.contains(originalName) {
+            return assetsDir.appending(path: originalName, directoryHint: .notDirectory)
+        }
+        let stem = sourceURL.deletingPathExtension().lastPathComponent
+        let ext = sourceURL.pathExtension
+        var counter = 1
+        while true {
+            let candidate = ext.isEmpty ? "\(stem)-\(counter)" : "\(stem)-\(counter).\(ext)"
+            if !usedNames.contains(candidate) {
+                return assetsDir.appending(path: candidate, directoryHint: .notDirectory)
+            }
+            counter += 1
+        }
+    }
+}
+
+enum ThemeExportError: LocalizedError {
+    case invalidName(String)
+    case archiveFailed(status: Int32, stderr: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidName(let name):
+            return "The name \"\(name)\" can't be used as a theme identifier."
+        case .archiveFailed(let status, let stderr):
+            let detail = stderr.isEmpty ? "" : " (\(stderr.trimmingCharacters(in: .whitespacesAndNewlines)))"
+            return "Failed to write theme archive (exit \(status))\(detail)."
+        }
+    }
 }
 
 enum ThemeImportError: LocalizedError {

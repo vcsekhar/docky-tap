@@ -1929,6 +1929,34 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         return effectiveDividerImageURL
     }
 
+    // MARK: - Explicit appearance values (for theme export)
+    //
+    // Returns the color when it comes from a deliberate source —
+    // either a user override on this preference or the active theme's
+    // manifest. Returns `nil` when the only value would be the
+    // built-in system fallback, because that isn't meaningfully
+    // portable to another machine.
+
+    var explicitWindowTintColor: ThemeColor? {
+        if isAppearanceOverridden(Keys.windowTintColor), let user = windowTintColor {
+            return ThemeColor(r: user.red, g: user.green, b: user.blue)
+        }
+        if let themed = ThemeManager.shared.activeManifest?.appearance.window?.tintColor {
+            return themed
+        }
+        return nil
+    }
+
+    var explicitActiveIndicatorColor: ThemeColor? {
+        if isAppearanceOverridden(Keys.activeIndicatorColor), let user = activeIndicatorColor {
+            return ThemeColor(r: user.red, g: user.green, b: user.blue)
+        }
+        if let themed = ThemeManager.shared.activeManifest?.appearance.indicators?.color {
+            return themed
+        }
+        return nil
+    }
+
     /// Resolves the divider image and mirroring flag for a given divider position class.
     /// Returns `nil` when no custom image applies.
     func resolvedDividerImage(forPositionClass positionClass: DockDividerPositionClass) -> (url: URL, mirrored: Bool)? {

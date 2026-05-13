@@ -77,6 +77,12 @@ struct ThemesSettingsView: View {
                     }
 
                     Button {
+                        exportTheme()
+                    } label: {
+                        Label("Export to Theme…", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
                         revealThemesFolder()
                     } label: {
                         Label("Reveal Themes Folder", systemImage: "folder")
@@ -214,6 +220,36 @@ struct ThemesSettingsView: View {
             importErrorMessage = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
         }
+    }
+
+    private func exportTheme() {
+        let panel = NSSavePanel()
+        panel.title = "Export Theme"
+        panel.nameFieldStringValue = defaultExportName()
+        panel.allowedContentTypes = ThemesSettingsView.importContentTypes
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // The filename (sans extension) becomes the theme's display
+        // name; the slugified version is the manifest id. This keeps
+        // export as a single-click flow without an extra naming sheet.
+        let name = url.deletingPathExtension().lastPathComponent
+        do {
+            try manager.exportCurrentAppearance(name: name, to: url)
+        } catch {
+            importErrorMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+        }
+    }
+
+    private func defaultExportName() -> String {
+        if let active = manager.activeManifest {
+            return "\(active.name) Copy.dockytheme"
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "My Docky Theme \(formatter.string(from: Date())).dockytheme"
     }
 
     private var deletionDialogBinding: Binding<Bool> {
