@@ -845,16 +845,15 @@ struct TileContainerView: View {
         }
     }
 
-    /// Magnification is suppressed in conditions where it would interfere
-    /// with another layout mechanism: overflow scaling, scrollable section
-    /// mode, edit mode, or an active drag. Also off when `largeSize` is at
-    /// or below `tileSize` (no headroom to grow into).
+    /// Magnification is suppressed in conditions where it would conflict
+    /// with another interaction (edit mode, active drag) or when there's
+    /// no headroom to grow into. Overflow rescaling does NOT disable it —
+    /// when the dock is squished, magnification still pops icons up to
+    /// the full `largeSize`, which is how Apple's Dock behaves.
     private var magnificationActive: Bool {
         guard dockSettings.magnification else { return false }
         guard !editMode.isActive else { return false }
         guard draggedTileID == nil else { return false }
-        guard layout.contentScale > 0.999 else { return false }
-        guard !layout.compactsWidgetsForOverflow else { return false }
         guard dockSettings.largeSize > dockSettings.tileSize else { return false }
         return true
     }
@@ -885,9 +884,14 @@ struct TileContainerView: View {
     }
 
     private var magnificationModel: DockMagnificationModel {
+        // baseSize is the scaled (possibly shrunken) resting extent so the
+        // falloff lands cleanly at the rest size at the edge of the
+        // influence radius. maxSize is the UNscaled `largeSize` so a
+        // crowded, shrunken dock still pops icons up to their full
+        // magnified size on hover — matching Apple's behavior.
         DockMagnificationModel(
             baseSize: effectiveTileSize,
-            maxSize: layout.scaled(dockSettings.largeSize),
+            maxSize: dockSettings.largeSize,
             influenceRadius: effectiveTileSize * 2.5,
             strength: magnification.strength,
             cursorAxisLocation: cursorAxisLocation

@@ -637,11 +637,15 @@ final class MainWindow: NSPanel {
         // Magnified icons render beyond the chrome's natural cross-axis
         // extent. We grow only the window, not the chrome rect, so the
         // chrome itself keeps its resting shape and the icons spill into
-        // the headroom above (or beside, on a vertical dock) it.
+        // the headroom above (or beside, on a vertical dock) it. Peak
+        // size is the UNscaled `largeSize` even when overflow has shrunk
+        // the resting tiles — so headroom is measured from the scaled
+        // chrome height up to that fixed peak.
+        let scaledBaseTileSize = dockSettings.tileSize * contentScale
         let magnificationHeadroom: CGFloat = (
-            dockSettings.magnification && dockSettings.largeSize > dockSettings.tileSize
+            dockSettings.magnification && dockSettings.largeSize > scaledBaseTileSize
         )
-            ? (dockSettings.largeSize - dockSettings.tileSize) * contentScale
+            ? dockSettings.largeSize - scaledBaseTileSize
             : 0
         let windowContentSize: CGSize = {
             guard magnificationHeadroom > 0 else { return displayedContentSize }
