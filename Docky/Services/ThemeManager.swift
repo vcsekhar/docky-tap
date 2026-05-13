@@ -470,6 +470,21 @@ import Observation
 struct InstalledTheme: Equatable {
     let manifest: ThemeManifest
     let bundleURL: URL
+
+    /// Optional `cover_image.png` (or `.jpg`/`.jpeg`) at the bundle
+    /// root. Used by the Themes settings pane as a rich preview.
+    /// Re-checked at access time so authors iterating on the file
+    /// don't need to relaunch or refresh.
+    var coverImageURL: URL? {
+        let fileManager = FileManager.default
+        for name in ["cover_image.png", "cover_image.jpg", "cover_image.jpeg"] {
+            let url = bundleURL.appending(path: name, directoryHint: .notDirectory)
+            if fileManager.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return nil
+    }
 }
 
 /// Stages copies of referenced image assets into an export bundle's

@@ -302,40 +302,62 @@ struct ThemesSettingsView: View {
     }
 }
 
-/// Square color/image preview chip used in the installed-themes list.
-/// Falls back to the theme's tint color when no background image is
-/// bundled, and to a neutral fill when neither is supplied.
+/// 16:9 cover/preview tile used in the installed-themes list.
+///
+/// Preference order:
+///   1. `cover_image.png` (or `.jpg`/`.jpeg`) at the bundle root —
+///      theme-author-supplied artwork.
+///   2. The theme's `appearance.window.backgroundImage` asset,
+///      scaled to fill — synthesizes a usable preview from the
+///      same asset the dock chrome would render.
+///   3. The manifest's `appearance.window.tintColor` — flat-color
+///      placeholder so a bare manifest still reads visually.
+///   4. A neutral secondary fill when none of the above apply.
 private struct ThemePreviewBadge: View {
     let manifest: ThemeManifest
 
+    private static let size = CGSize(width: 96, height: 54)
+    private static let cornerRadius: CGFloat = 8
+
     var body: some View {
-        let fill = manifest.appearance.window?.tintColor?.dockColor.nsColor
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(fill.map(Color.init(nsColor:)) ?? Color.secondary.opacity(0.2))
-            .frame(width: 44, height: 44)
+        let tint = manifest.appearance.window?.tintColor?.dockColor.nsColor
+        let cover = coverImageURL.flatMap { NSImage(contentsOf: $0) }
+        let background: NSImage? = cover == nil
+            ? backgroundImageURL.flatMap { NSImage(contentsOf: $0) }
+            : nil
+
+        RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+            .fill(tint.map(Color.init(nsColor:)) ?? Color.secondary.opacity(0.2))
+            .frame(width: Self.size.width, height: Self.size.height)
             .overlay {
-                if let imageURL = backgroundImageURL,
-                   let nsImage = NSImage(contentsOf: imageURL) {
-                    Image(nsImage: nsImage)
+                if let cover {
+                    Image(nsImage: cover)
                         .resizable()
                         .scaledToFill()
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .frame(width: Self.size.width, height: Self.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+                } else if let background {
+                    Image(nsImage: background)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: Self.size.width, height: Self.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
                 }
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
                     .strokeBorder(.separator, lineWidth: 0.5)
             }
     }
 
+    private var coverImageURL: URL? {
+        ThemeManager.shared.installedThemes[manifest.id]?.coverImageURL
+    }
+
     private var backgroundImageURL: URL? {
         guard let asset = manifest.appearance.window?.backgroundImage else { return nil }
-        guard manifest.id == ThemeManager.shared.activeThemeID
-            || ThemeManager.shared.installedThemes[manifest.id] != nil else {
-            return nil
-        }
-        // Use the manager's resolver so previews stay consistent with
-        // rendering paths (and pick up the same file-existence check).
+        // Use the manager's resolver when this theme is active so
+        // previews stay in lockstep with what the dock chrome renders.
         if ThemeManager.shared.activeThemeID == manifest.id {
             return ThemeManager.shared.activeAssetURL(asset)
         }

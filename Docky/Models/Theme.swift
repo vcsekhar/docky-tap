@@ -13,6 +13,12 @@
 //  `ThemeManager.activeBundleURL` so a theme stays portable when
 //  copied between machines.
 //
+//  Optional bundle-root files (not referenced by the manifest):
+//    - `cover_image.png` (or `.jpg`/`.jpeg`): displayed by the Themes
+//      settings pane as a rich preview. Convention over manifest
+//      configuration — drop a file in with that name and it's picked
+//      up automatically by `InstalledTheme.coverImageURL`.
+//
 
 import Foundation
 
