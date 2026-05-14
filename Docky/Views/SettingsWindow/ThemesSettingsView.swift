@@ -330,7 +330,7 @@ private struct ThemePreviewBadge: View {
     private static let cornerRadius: CGFloat = 8
 
     var body: some View {
-        let tint = manifest.appearance.window?.tintColor?.dockColor.nsColor
+        let tint = manifest.appearance.window?.tintColor?.nsColor
         let cover = coverImageURL.flatMap { NSImage(contentsOf: $0) }
         let background: NSImage? = cover == nil
             ? backgroundImageURL.flatMap { NSImage(contentsOf: $0) }

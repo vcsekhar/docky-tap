@@ -18,7 +18,7 @@
     },
     "indicators": {
       "shape": "underline",
-      "color": { "r": 0.0, "g": 0.4706, "b": 0.8431 },
+      "color": { "name": "accent" },
       "scale": 0.7,
       "offset": -2,
       "divider": {
@@ -35,8 +35,12 @@
       "verticalPadding": 4,
       "iconPadding": 6,
       "hover": {
-        "backgroundColor": { "r": 1, "g": 1, "b": 1 },
+        "backgroundColor": { "name": "white" },
         "backgroundOpacity": 0.12
+      },
+      "active": {
+        "backgroundColor": { "name": "white" },
+        "backgroundOpacity": 0.06
       }
     },
     "window": {

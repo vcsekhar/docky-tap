@@ -72,6 +72,21 @@
         }
       }
     },
+    "Active App Background" : {
+
+    },
+    "Active Background Color" : {
+
+    },
+    "Active Background Corner Radius" : {
+
+    },
+    "Active Background Image" : {
+
+    },
+    "Active Background Opacity" : {
+
+    },
     "Active Indicator Shape" : {
       "localizations" : {
         "es" : {
@@ -434,6 +449,9 @@
       }
     },
     "Background Corner Radius" : {
+
+    },
+    "Background fill drawn under every running app tile — independent of hover. Useful for taskbar-style \"highlighted active app\" looks." : {
 
     },
     "Background Image Mode" : {
@@ -4164,6 +4182,9 @@
           }
         }
       }
+    },
+    "Use Active Background" : {
+
     },
     "Use an image with aspect fill behind the dock tiles. When set, it replaces the material tint and opacity until cleared." : {
       "localizations" : {

@@ -465,6 +465,50 @@ struct TileView: View {
             || preferences.effectiveTileHoverBackgroundColor != nil
     }
 
+    /// Background drawn under the *foreground* (frontmost) app's tile.
+    /// Independent of hover — both can stack, with hover painted on top.
+    /// Updates live via `WorkspaceService.frontmostBundleIdentifier`.
+    @ViewBuilder
+    private var activeBackground: some View {
+        if isFrontmostTile, hasActiveBackground {
+            let cornerRadius = preferences.effectiveTileActiveBackgroundCornerRadius
+            let opacity = preferences.effectiveTileActiveBackgroundOpacity
+            ZStack {
+                if let url = preferences.effectiveTileActiveBackgroundImageURL,
+                   let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if let color = preferences.effectiveTileActiveBackgroundColor {
+                    Color(nsColor: color)
+                }
+            }
+            .opacity(opacity)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var hasActiveBackground: Bool {
+        preferences.effectiveTileActiveBackgroundImageURL != nil
+            || preferences.effectiveTileActiveBackgroundColor != nil
+    }
+
+    /// True when this tile represents the currently foreground app
+    /// (or any app inside a grouped folder is foreground).
+    private var isFrontmostTile: Bool {
+        switch tile.content {
+        case .app(let app):
+            return workspace.isFrontmost(bundleIdentifier: app.bundleIdentifier)
+        case .appFolder(let folder):
+            return folder.apps.contains { app in
+                workspace.isFrontmost(bundleIdentifier: app.bundleIdentifier)
+            }
+        case .folder, .launchpad, .widget, .smartStack, .spacer, .divider, .trash, .minimizedWindow:
+            return false
+        }
+    }
+
     /// Effective drop shadow applied behind the tile's icon content.
     /// Returns `Color.clear` when no shadow color is set — combined
     /// with a 0 radius below, that makes `.shadow(...)` a true no-op.
@@ -501,6 +545,7 @@ struct TileView: View {
             .animation(.easeInOut(duration: 0.15), value: isHovering)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .background(hoverBackground)
+            .background(activeBackground)
             .overlay(alignment: runningIndicatorAlignment) {
                 runningIndicator
                     .padding(runningIndicatorEdge, runningIndicatorInset)

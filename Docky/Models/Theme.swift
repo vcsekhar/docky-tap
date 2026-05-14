@@ -28,6 +28,7 @@
 //      while the theme is in use.
 //
 
+import AppKit
 import Foundation
 
 /// Top-level manifest stored at `<bundle>/theme.json`.
@@ -90,6 +91,17 @@ struct ThemeTile: Codable, Equatable {
     /// How the tile reacts to mouse hover. Each field is optional so
     /// a theme can opt into just one effect (e.g. only `backgroundColor`).
     var hover: ThemeTileHover?
+    /// Background drawn under every currently-running app tile.
+    /// Independent of `hover`: both can be active simultaneously and
+    /// the hover layer paints on top.
+    var active: ThemeTileActive?
+}
+
+struct ThemeTileActive: Codable, Equatable {
+    var backgroundColor: ThemeColor?
+    var backgroundImage: String?
+    var backgroundOpacity: CGFloat?
+    var backgroundCornerRadius: CGFloat?
 }
 
 struct ThemeTileHover: Codable, Equatable {
@@ -190,11 +202,72 @@ struct ThemeShadow: Codable, Equatable {
 }
 
 struct ThemeColor: Codable, Equatable {
-    let r: Double
-    let g: Double
-    let b: Double
+    /// Component-based variants set r/g/b (0…1). Named variants set
+    /// `name` and may omit components entirely. Both are optional so
+    /// either form decodes without bespoke `init(from:)`.
+    var r: Double?
+    var g: Double?
+    var b: Double?
 
-    var dockColor: DockColor {
-        DockColor(red: r, green: g, blue: b)
+    /// Resolved live against the running system, so a theme referencing
+    /// `"accent"` re-tints when the user changes their macOS accent.
+    /// Supported names (case-insensitive):
+    ///   `accent` / `tint` / `controlAccent`
+    ///   `label`, `secondaryLabel`, `tertiaryLabel`, `quaternaryLabel`
+    ///   `systemBlue`, `systemRed`, `systemGreen`, `systemYellow`,
+    ///   `systemOrange`, `systemPurple`, `systemPink`, `systemTeal`,
+    ///   `systemIndigo`, `systemMint`, `systemBrown`, `systemGray`
+    ///   `white`, `black`, `clear`
+    var name: String?
+
+    /// Snapshot RGB representation. Returns the named color's current
+    /// RGB sample when only `name` is set, so anything that has to
+    /// persist a value (user overrides) can capture a moment in time.
+    /// `nil` when neither RGB nor a resolvable name was supplied.
+    var dockColor: DockColor? {
+        if let nsColor {
+            return DockColor(nsColor: nsColor)
+        }
+        return nil
+    }
+
+    /// Live NSColor — named colors are looked up on every read so theme
+    /// fields like `"accent"` track the user's current system tint.
+    var nsColor: NSColor? {
+        if let name, let resolved = Self.resolveNamedColor(name) {
+            return resolved
+        }
+        if let r, let g, let b {
+            return NSColor(deviceRed: r, green: g, blue: b, alpha: 1)
+        }
+        return nil
+    }
+
+    static func resolveNamedColor(_ name: String) -> NSColor? {
+        switch name.lowercased() {
+        case "accent", "tint", "controlaccent": return .controlAccentColor
+        case "label": return .labelColor
+        case "secondarylabel": return .secondaryLabelColor
+        case "tertiarylabel": return .tertiaryLabelColor
+        case "quaternarylabel": return .quaternaryLabelColor
+        case "systemblue": return .systemBlue
+        case "systemred": return .systemRed
+        case "systemgreen": return .systemGreen
+        case "systemyellow": return .systemYellow
+        case "systemorange": return .systemOrange
+        case "systempurple": return .systemPurple
+        case "systempink": return .systemPink
+        case "systemteal": return .systemTeal
+        case "systemindigo": return .systemIndigo
+        case "systemmint":
+            if #available(macOS 12.0, *) { return .systemMint }
+            return .systemTeal
+        case "systembrown": return .systemBrown
+        case "systemgray": return .systemGray
+        case "white": return .white
+        case "black": return .black
+        case "clear": return .clear
+        default: return nil
+        }
     }
 }

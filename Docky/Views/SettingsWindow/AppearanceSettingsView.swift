@@ -521,6 +521,61 @@ struct AppearanceSettingsView: View {
             .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("Active App Background")
+                    .font(.headline)
+
+                Toggle("Use Active Background", isOn: usesActiveBackgroundColorBinding)
+
+                if preferences.tileActiveBackgroundColor != nil {
+                    ColorPicker("Active Background Color", selection: activeBackgroundColorBinding, supportsOpacity: false)
+                }
+
+                HStack {
+                    Text("Active Background Image")
+                    Spacer()
+                    Button("Choose Image...") { chooseTileActiveBackgroundImage() }
+                    if preferences.tileActiveBackgroundImagePath != nil {
+                        Button("Clear") { preferences.tileActiveBackgroundImagePath = nil }
+                    }
+                }
+
+                if let name = selectedActiveBackgroundImageName {
+                    Text(name)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+
+                HStack {
+                    Text("Background Opacity")
+                    Slider(value: activeBackgroundOpacityBinding, in: 0...1, step: 0.05) {
+                        Text("Active Background Opacity")
+                    }
+                    .labelsHidden()
+                    Text("\(Int((preferences.effectiveTileActiveBackgroundOpacity * 100).rounded()))%")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 56, alignment: .trailing)
+                }
+                .disabled(!hasActiveBackgroundSource)
+
+                HStack {
+                    Text("Background Corner Radius")
+                    Slider(value: activeBackgroundCornerRadiusBinding, in: 0...32, step: 1) {
+                        Text("Active Background Corner Radius")
+                    }
+                    .labelsHidden()
+                    Text("\(Int(preferences.effectiveTileActiveBackgroundCornerRadius)) pt")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 56, alignment: .trailing)
+                }
+                .disabled(!hasActiveBackgroundSource)
+
+                Text("Background fill drawn under every running app tile — independent of hover. Useful for taskbar-style \"highlighted active app\" looks.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle("Use Icon Shadow", isOn: usesIconShadowBinding)
                     .font(.headline)
 
@@ -1031,6 +1086,74 @@ struct AppearanceSettingsView: View {
         }
 
         preferences.windowBackgroundImagePath = url.path
+    }
+
+    private func chooseTileActiveBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = "Choose Image"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        preferences.tileActiveBackgroundImagePath = url.path
+    }
+
+    private var selectedActiveBackgroundImageName: String? {
+        guard let path = preferences.tileActiveBackgroundImagePath, !path.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    private var hasActiveBackgroundSource: Bool {
+        preferences.effectiveTileActiveBackgroundColor != nil
+            || preferences.effectiveTileActiveBackgroundImageURL != nil
+    }
+
+    private var usesActiveBackgroundColorBinding: Binding<Bool> {
+        Binding(
+            get: { preferences.effectiveTileActiveBackgroundColor != nil },
+            set: { uses in
+                if uses {
+                    let seed = preferences.effectiveTileActiveBackgroundColor ?? .controlAccentColor
+                    preferences.tileActiveBackgroundColor = DockColor(nsColor: seed)
+                } else {
+                    preferences.tileActiveBackgroundColor = nil
+                }
+            }
+        )
+    }
+
+    private var activeBackgroundColorBinding: Binding<Color> {
+        Binding(
+            get: {
+                let ns = preferences.effectiveTileActiveBackgroundColor ?? .controlAccentColor
+                return Color(nsColor: ns)
+            },
+            set: { newValue in
+                guard let color = DockColor(nsColor: NSColor(newValue)) else { return }
+                preferences.tileActiveBackgroundColor = color
+            }
+        )
+    }
+
+    private var activeBackgroundOpacityBinding: Binding<Double> {
+        Binding(
+            get: { Double(preferences.effectiveTileActiveBackgroundOpacity) },
+            set: { preferences.tileActiveBackgroundOpacity = CGFloat($0) }
+        )
+    }
+
+    private var activeBackgroundCornerRadiusBinding: Binding<Double> {
+        Binding(
+            get: { Double(preferences.effectiveTileActiveBackgroundCornerRadius) },
+            set: { preferences.tileActiveBackgroundCornerRadius = CGFloat($0) }
+        )
     }
 
     private func chooseTileHoverBackgroundImage() {

@@ -880,6 +880,10 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         Keys.tileHoverBackgroundImagePath,
         Keys.tileHoverBackgroundOpacity,
         Keys.tileHoverBackgroundCornerRadius,
+        Keys.tileActiveBackgroundColor,
+        Keys.tileActiveBackgroundImagePath,
+        Keys.tileActiveBackgroundOpacity,
+        Keys.tileActiveBackgroundCornerRadius,
         Keys.windowCornerRadius,
         Keys.windowCornerRadiusTopLeading,
         Keys.windowCornerRadiusTopTrailing,
@@ -1071,6 +1075,59 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
                 clearAppearanceOverride(Keys.tileHoverBackgroundCornerRadius)
             } else {
                 markAppearanceOverride(Keys.tileHoverBackgroundCornerRadius)
+            }
+        }
+    }
+
+    /// Active-tile background — same surface as the hover background
+    /// but painted under every running app tile, regardless of hover.
+    /// Used together with the underline / dot / pill indicator for
+    /// Windows-style "highlighted active app" looks.
+    var tileActiveBackgroundColor: DockColor? {
+        didSet {
+            guard tileActiveBackgroundColor != oldValue else { return }
+            persistOptionalColor(tileActiveBackgroundColor, forKey: Keys.tileActiveBackgroundColor)
+            if tileActiveBackgroundColor == nil {
+                clearAppearanceOverride(Keys.tileActiveBackgroundColor)
+            } else {
+                markAppearanceOverride(Keys.tileActiveBackgroundColor)
+            }
+        }
+    }
+
+    var tileActiveBackgroundImagePath: String? {
+        didSet {
+            guard tileActiveBackgroundImagePath != oldValue else { return }
+            if let path = tileActiveBackgroundImagePath, !path.isEmpty {
+                defaults.set(path, forKey: Keys.tileActiveBackgroundImagePath)
+                markAppearanceOverride(Keys.tileActiveBackgroundImagePath)
+            } else {
+                defaults.removeObject(forKey: Keys.tileActiveBackgroundImagePath)
+                clearAppearanceOverride(Keys.tileActiveBackgroundImagePath)
+            }
+        }
+    }
+
+    var tileActiveBackgroundOpacity: CGFloat? {
+        didSet {
+            guard tileActiveBackgroundOpacity != oldValue else { return }
+            persistOptionalDouble(tileActiveBackgroundOpacity, forKey: Keys.tileActiveBackgroundOpacity)
+            if tileActiveBackgroundOpacity == nil {
+                clearAppearanceOverride(Keys.tileActiveBackgroundOpacity)
+            } else {
+                markAppearanceOverride(Keys.tileActiveBackgroundOpacity)
+            }
+        }
+    }
+
+    var tileActiveBackgroundCornerRadius: CGFloat? {
+        didSet {
+            guard tileActiveBackgroundCornerRadius != oldValue else { return }
+            persistOptionalDouble(tileActiveBackgroundCornerRadius, forKey: Keys.tileActiveBackgroundCornerRadius)
+            if tileActiveBackgroundCornerRadius == nil {
+                clearAppearanceOverride(Keys.tileActiveBackgroundCornerRadius)
+            } else {
+                markAppearanceOverride(Keys.tileActiveBackgroundCornerRadius)
             }
         }
     }
@@ -2078,8 +2135,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         if isAppearanceOverridden(Keys.tileHoverBackgroundColor), let user = tileHoverBackgroundColor {
             return user.nsColor
         }
-        if let themed = ThemeManager.shared.activeManifest?.appearance.tile?.hover?.backgroundColor {
-            return themed.dockColor.nsColor
+        if let themed = ThemeManager.shared.activeManifest?.appearance.tile?.hover?.backgroundColor,
+           let resolved = themed.nsColor {
+            return resolved
         }
         return nil
     }
@@ -2111,6 +2169,52 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
     var effectiveTileHoverBackgroundCornerRadius: CGFloat {
         let themed = ThemeManager.shared.activeManifest?.appearance.tile?.hover?.backgroundCornerRadius
         if isAppearanceOverridden(Keys.tileHoverBackgroundCornerRadius), let user = tileHoverBackgroundCornerRadius {
+            return max(0, user)
+        }
+        if let themed {
+            return max(0, themed)
+        }
+        return 0
+    }
+
+    var effectiveTileActiveBackgroundColor: NSColor? {
+        if isAppearanceOverridden(Keys.tileActiveBackgroundColor), let user = tileActiveBackgroundColor {
+            return user.nsColor
+        }
+        if let themed = ThemeManager.shared.activeManifest?.appearance.tile?.active?.backgroundColor,
+           let resolved = themed.nsColor {
+            return resolved
+        }
+        return nil
+    }
+
+    var effectiveTileActiveBackgroundImageURL: URL? {
+        if isAppearanceOverridden(Keys.tileActiveBackgroundImagePath),
+           let path = tileActiveBackgroundImagePath, !path.isEmpty,
+           FileManager.default.fileExists(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+        if let assetPath = ThemeManager.shared.activeManifest?.appearance.tile?.active?.backgroundImage,
+           let url = ThemeManager.shared.activeAssetURL(assetPath) {
+            return url
+        }
+        return nil
+    }
+
+    var effectiveTileActiveBackgroundOpacity: CGFloat {
+        let themed = ThemeManager.shared.activeManifest?.appearance.tile?.active?.backgroundOpacity
+        if isAppearanceOverridden(Keys.tileActiveBackgroundOpacity), let user = tileActiveBackgroundOpacity {
+            return max(0, min(1, user))
+        }
+        if let themed {
+            return max(0, min(1, themed))
+        }
+        return 1
+    }
+
+    var effectiveTileActiveBackgroundCornerRadius: CGFloat {
+        let themed = ThemeManager.shared.activeManifest?.appearance.tile?.active?.backgroundCornerRadius
+        if isAppearanceOverridden(Keys.tileActiveBackgroundCornerRadius), let user = tileActiveBackgroundCornerRadius {
             return max(0, user)
         }
         if let themed {
@@ -2221,8 +2325,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         if isAppearanceOverridden(Keys.windowTintColor), let user = windowTintColor {
             return user.nsColor
         }
-        if let themed = ThemeManager.shared.activeManifest?.appearance.window?.tintColor {
-            return themed.dockColor.nsColor
+        if let themed = ThemeManager.shared.activeManifest?.appearance.window?.tintColor,
+           let resolved = themed.nsColor {
+            return resolved
         }
         return Self.defaultWindowTintColor
     }
@@ -2271,8 +2376,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         if isAppearanceOverridden(Keys.windowBorderColor), let user = windowBorderColor {
             return user.nsColor
         }
-        if let themed = ThemeManager.shared.activeManifest?.appearance.window?.borderColor {
-            return themed.dockColor.nsColor
+        if let themed = ThemeManager.shared.activeManifest?.appearance.window?.borderColor,
+           let resolved = themed.nsColor {
+            return resolved
         }
         return nil
     }
@@ -2290,8 +2396,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         if isAppearanceOverridden(Keys.iconShadowColor), let user = iconShadowColor {
             return user.nsColor
         }
-        if let themed = ThemeManager.shared.activeManifest?.appearance.iconShadow?.color {
-            return themed.dockColor.nsColor
+        if let themed = ThemeManager.shared.activeManifest?.appearance.iconShadow?.color,
+           let resolved = themed.nsColor {
+            return resolved
         }
         return nil
     }
@@ -2319,8 +2426,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         if isAppearanceOverridden(Keys.dividerColor), let user = dividerColor {
             return user.nsColor
         }
-        if let themed = ThemeManager.shared.activeManifest?.appearance.indicators?.divider?.color {
-            return themed.dockColor.nsColor
+        if let themed = ThemeManager.shared.activeManifest?.appearance.indicators?.divider?.color,
+           let resolved = themed.nsColor {
+            return resolved
         }
         return nil
     }
@@ -2335,8 +2443,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         if isAppearanceOverridden(Keys.activeIndicatorColor), let user = activeIndicatorColor {
             return user.nsColor
         }
-        if let themed = ThemeManager.shared.activeManifest?.appearance.indicators?.color {
-            return themed.dockColor.nsColor
+        if let themed = ThemeManager.shared.activeManifest?.appearance.indicators?.color,
+           let resolved = themed.nsColor {
+            return resolved
         }
         return .labelColor
     }
@@ -2769,6 +2878,10 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         static let tileHoverBackgroundImagePath = "docky.tileHoverBackgroundImagePath"
         static let tileHoverBackgroundOpacity = "docky.tileHoverBackgroundOpacity"
         static let tileHoverBackgroundCornerRadius = "docky.tileHoverBackgroundCornerRadius"
+        static let tileActiveBackgroundColor = "docky.tileActiveBackgroundColor"
+        static let tileActiveBackgroundImagePath = "docky.tileActiveBackgroundImagePath"
+        static let tileActiveBackgroundOpacity = "docky.tileActiveBackgroundOpacity"
+        static let tileActiveBackgroundCornerRadius = "docky.tileActiveBackgroundCornerRadius"
         static let windowCornerRadius = "docky.windowCornerRadius"
         static let windowCornerRadiusTopLeading = "docky.windowCornerRadiusTopLeading"
         static let windowCornerRadiusTopTrailing = "docky.windowCornerRadiusTopTrailing"
@@ -2951,6 +3064,10 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         let storedTileHoverBackgroundImagePath = defaults.string(forKey: Keys.tileHoverBackgroundImagePath)
         let storedTileHoverBackgroundOpacity = defaults.object(forKey: Keys.tileHoverBackgroundOpacity) as? Double
         let storedTileHoverBackgroundCornerRadius = defaults.object(forKey: Keys.tileHoverBackgroundCornerRadius) as? Double
+        let storedTileActiveBackgroundColor = defaults.data(forKey: Keys.tileActiveBackgroundColor)
+        let storedTileActiveBackgroundImagePath = defaults.string(forKey: Keys.tileActiveBackgroundImagePath)
+        let storedTileActiveBackgroundOpacity = defaults.object(forKey: Keys.tileActiveBackgroundOpacity) as? Double
+        let storedTileActiveBackgroundCornerRadius = defaults.object(forKey: Keys.tileActiveBackgroundCornerRadius) as? Double
         let storedWindowCornerRadius = defaults.object(forKey: Keys.windowCornerRadius) as? Double
         let storedWindowCornerRadiusTopLeading = defaults.object(forKey: Keys.windowCornerRadiusTopLeading) as? Double
         let storedWindowCornerRadiusTopTrailing = defaults.object(forKey: Keys.windowCornerRadiusTopTrailing) as? Double
@@ -3044,6 +3161,10 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         self.tileHoverBackgroundImagePath = storedTileHoverBackgroundImagePath
         self.tileHoverBackgroundOpacity = storedTileHoverBackgroundOpacity.map { CGFloat($0) }
         self.tileHoverBackgroundCornerRadius = storedTileHoverBackgroundCornerRadius.map { CGFloat($0) }
+        self.tileActiveBackgroundColor = Self.decodeColor(from: storedTileActiveBackgroundColor)
+        self.tileActiveBackgroundImagePath = storedTileActiveBackgroundImagePath
+        self.tileActiveBackgroundOpacity = storedTileActiveBackgroundOpacity.map { CGFloat($0) }
+        self.tileActiveBackgroundCornerRadius = storedTileActiveBackgroundCornerRadius.map { CGFloat($0) }
         self.windowCornerRadius = storedWindowCornerRadius.map { CGFloat($0) } ?? DefaultValues.windowCornerRadius
         self.windowCornerRadiusTopLeading = storedWindowCornerRadiusTopLeading.map { CGFloat($0) }
         self.windowCornerRadiusTopTrailing = storedWindowCornerRadiusTopTrailing.map { CGFloat($0) }
@@ -3226,6 +3347,12 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         tileHoverBackgroundImagePath = nil
         tileHoverBackgroundOpacity = nil
         tileHoverBackgroundCornerRadius = nil
+
+        // Tile Active Background
+        tileActiveBackgroundColor = nil
+        tileActiveBackgroundImagePath = nil
+        tileActiveBackgroundOpacity = nil
+        tileActiveBackgroundCornerRadius = nil
 
         // Icon Shadow (lives next to Tile Layout in the UI)
         iconShadowColor = DefaultValues.iconShadowColor

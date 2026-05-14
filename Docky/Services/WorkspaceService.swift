@@ -42,6 +42,10 @@ final class WorkspaceService: ObservableObject {
     @Published private(set) var minimizedWindows: [AppWindow] = []
     @Published private(set) var minimizedWindowPreviews: [String: NSImage] = [:]
     @Published private(set) var appWindowPreviews: [String: NSImage] = [:]
+    /// Bundle identifier of the app that currently owns the system
+    /// activation (foreground), or `nil` when nothing is frontmost
+    /// (rare — typically transient during space switches).
+    @Published private(set) var frontmostBundleIdentifier: String?
 
     private var runningByBundleID: [String: RunningApp] = [:]
 
@@ -80,6 +84,10 @@ final class WorkspaceService: ObservableObject {
 
     func isRunning(bundleIdentifier: String) -> Bool {
         runningByBundleID[bundleIdentifier] != nil
+    }
+
+    func isFrontmost(bundleIdentifier: String) -> Bool {
+        frontmostBundleIdentifier == bundleIdentifier
     }
 
     func isHidden(bundleIdentifier: String) -> Bool {
@@ -581,6 +589,29 @@ final class WorkspaceService: ObservableObject {
             }
             observers.append(token)
         }
+
+        // Track the frontmost (foreground) app independently of the
+        // running-apps list so the "active tile background" can paint
+        // under just the focused tile, not every running one.
+        let frontmostToken = center.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            self?.updateFrontmost(app ?? NSWorkspace.shared.frontmostApplication)
+        }
+        observers.append(frontmostToken)
+
+        // Seed once so the first render after launch already reflects
+        // whichever app was foreground when Docky came up.
+        updateFrontmost(NSWorkspace.shared.frontmostApplication)
+    }
+
+    private func updateFrontmost(_ app: NSRunningApplication?) {
+        let next = app?.bundleIdentifier
+        guard next != frontmostBundleIdentifier else { return }
+        frontmostBundleIdentifier = next
     }
 
     private func subscribeToPermissions() {
