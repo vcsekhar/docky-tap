@@ -465,6 +465,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         )
         overrideSettingsItem.target = self
 
+        let windowPreviewsItem = NSMenuItem(
+            title: "Window Previews…",
+            action: #selector(showWindowPreviewsDebug(_:)),
+            keyEquivalent: ""
+        )
+        windowPreviewsItem.target = self
+
         let productModeMenu = NSMenu(title: "Product Mode")
 
         let freeModeItem = NSMenuItem(
@@ -523,6 +530,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         debugMenu.addItem(seedDummyWidgetContentItem)
         debugMenu.addItem(showOnboardingItem)
         debugMenu.addItem(overrideSettingsItem)
+        debugMenu.addItem(windowPreviewsItem)
         debugMenu.addItem(productModeItem)
 #if DEBUG
         debugMenu.addItem(makeSimulatedOSVersionMenuItem())
@@ -595,6 +603,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let version = sender.representedObject as? OperatingSystemVersion else { return }
         FeatureGate.shared.setPreferredOSVersion(version)
         relaunchApp()
+    }
+
+    /// Opens the DEBUG-only window-previews inspector: a table of
+    /// every tracked `AppWindow` paired with the thumbnail Docky is
+    /// currently caching for it. Useful for diagnosing wrong /
+    /// stale capture content (e.g. the menu bar standing in for an
+    /// app's actual window).
+    @objc private func showWindowPreviewsDebug(_ sender: Any?) {
+        #if DEBUG
+        WindowPreviewsDebugWindowController.shared.show()
+        #endif
     }
 
     /// Replace every `docky.*` UserDefaults key with the contents of

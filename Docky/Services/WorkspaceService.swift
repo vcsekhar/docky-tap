@@ -654,6 +654,17 @@ final class WorkspaceService: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Debug-only: clear the "already attempted" set so every visible
+    /// window is re-considered on the next refresh, then run the
+    /// refresh immediately. Useful when the initial post-launch
+    /// capture pass missed windows (e.g. permission was granted
+    /// after refresh fired) and they're stuck without a thumbnail.
+    func forceRefreshWindowPreviews() {
+        attemptedAppWindowPreviewIDs.removeAll()
+        attemptedMinimizedWindowPreviewIDs.removeAll()
+        refreshWindowDerivedState()
+    }
+
     private func refreshWindowDerivedState() {
         let registry = WindowRegistry.shared
         let nextMinimized = registry.minimized
@@ -832,7 +843,8 @@ final class WorkspaceService: ObservableObject {
                [.optionIncludingWindow],
                CGWindowID(windowNumber),
                [.boundsIgnoreFraming, .bestResolution]
-           ) {
+           ),
+           isCaptureShapeReasonable(cgImage, expectedFrame: window.frame) {
             return makeThumbnail(from: cgImage, maxSize: CGSize(width: 480, height: 300))
         }
 
@@ -862,7 +874,8 @@ final class WorkspaceService: ObservableObject {
                 [.optionIncludingWindow],
                 shareableWindow.windowID,
                 [.boundsIgnoreFraming, .bestResolution]
-            ) {
+            ),
+               isCaptureShapeReasonable(cgImage, expectedFrame: window.frame) {
                 return makeThumbnail(from: cgImage, maxSize: CGSize(width: 480, height: 300))
             }
 
@@ -940,7 +953,8 @@ final class WorkspaceService: ObservableObject {
                 [.optionIncludingWindow],
                 shareableWindow.windowID,
                 [.boundsIgnoreFraming, .bestResolution]
-            ) {
+            ),
+               isCaptureShapeReasonable(cgImage, expectedFrame: window.frame) {
                 return makeThumbnail(from: cgImage, maxSize: CGSize(width: 320, height: 200))
             }
 
@@ -981,7 +995,21 @@ final class WorkspaceService: ObservableObject {
                 || owningApplication.bundleIdentifier == window.bundleIdentifier
         }
 
-        let titledCandidates = candidates.filter { shareableWindow in
+        // Frame-shape filter: when AX gave us a frame, prefer
+        // SCWindows whose own frame matches that frame's size
+        // within a reasonable tolerance. This eliminates sliver
+        // overlays (chrome strips, dynamic-island shims, etc.)
+        // that an app owns alongside its real content window —
+        // a single Simulator process can publish a thin "control"
+        // window plus the actual iPhone content window, and the
+        // legacy match-by-title/index path would happily pick the
+        // strip and we'd capture a 4-pixel-tall thumbnail.
+        let shapeMatched = candidates.filter { sc in
+            isFrameApproximatelyEqual(sc.frame, to: window.frame)
+        }
+        let primaryPool = shapeMatched.isEmpty ? candidates : shapeMatched
+
+        let titledCandidates = primaryPool.filter { shareableWindow in
             normalizedWindowTitle(shareableWindow.title) == normalizedWindowTitle(window.windowTitle)
         }
 
@@ -1000,11 +1028,42 @@ final class WorkspaceService: ObservableObject {
             return titleMatch
         }
 
-        if candidates.indices.contains(lookupIndex) {
-            return candidates[lookupIndex]
+        if primaryPool.indices.contains(lookupIndex) {
+            return primaryPool[lookupIndex]
         }
 
-        return candidates.first
+        return primaryPool.first ?? candidates.first
+    }
+
+    /// True when both rectangles have positive sizes and each
+    /// dimension is within 20% of the other. Used to reject
+    /// sliver / chrome SCWindows that don't resemble the AX
+    /// element's reported window.
+    private func isFrameApproximatelyEqual(_ a: CGRect, to b: CGRect?) -> Bool {
+        guard let b, a.width > 0, a.height > 0, b.width > 0, b.height > 0 else {
+            return false
+        }
+        let dw = abs(a.width - b.width) / b.width
+        let dh = abs(a.height - b.height) / b.height
+        return dw < 0.20 && dh < 0.20
+    }
+
+    /// Sanity check on a `CGWindowListCreateImagePrivate` result:
+    /// the legacy API will happily hand back a 4-px-tall strip when
+    /// the supplied window ID points at a chrome / overlay window
+    /// rather than the AX element's actual content. If the captured
+    /// CGImage's aspect ratio is more than 3× off from the AX frame
+    /// we discard it and let the call site fall through to the SC
+    /// path.
+    private func isCaptureShapeReasonable(_ cgImage: CGImage, expectedFrame: CGRect?) -> Bool {
+        guard let expectedFrame, expectedFrame.width > 0, expectedFrame.height > 0,
+              cgImage.width > 0, cgImage.height > 0 else {
+            return true
+        }
+        let imageRatio = CGFloat(cgImage.width) / CGFloat(cgImage.height)
+        let frameRatio = expectedFrame.width / expectedFrame.height
+        let ratio = imageRatio / frameRatio
+        return ratio < 3 && ratio > (1.0 / 3.0)
     }
 
     private func normalizedWindowTitle(_ title: String?) -> String {
