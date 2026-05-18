@@ -196,6 +196,11 @@ final class SettingsNavigator {
 
 struct SettingsRootView: View {
     @State private var selection: SettingsPane = .docky
+    @State private var history: [SettingsPane] = [.docky]
+    @State private var historyIndex: Int = 0
+    // Suppresses history pushes when the selection change originated from
+    // a back/forward button rather than a fresh user navigation.
+    @State private var isNavigatingHistory = false
     @Bindable private var navigator = SettingsNavigator.shared
 
     var body: some View {
@@ -223,8 +228,59 @@ struct SettingsRootView: View {
             SettingsDetailView(pane: selection)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 2) {
+                    Button(action: goBack) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(!canGoBack)
+                    .keyboardShortcut("[", modifiers: .command)
+                    .help("Back")
+
+                    Button(action: goForward) {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(!canGoForward)
+                    .keyboardShortcut("]", modifiers: .command)
+                    .help("Forward")
+                }
+            }
+        }
         .onAppear { consumePendingPane() }
         .onChange(of: navigator.pendingPaneID) { _ in consumePendingPane() }
+        .onChange(of: selection) { newPane in recordHistory(newPane) }
+    }
+
+    private var canGoBack: Bool { historyIndex > 0 }
+    private var canGoForward: Bool { historyIndex < history.count - 1 }
+
+    private func goBack() {
+        guard canGoBack else { return }
+        isNavigatingHistory = true
+        historyIndex -= 1
+        selection = history[historyIndex]
+    }
+
+    private func goForward() {
+        guard canGoForward else { return }
+        isNavigatingHistory = true
+        historyIndex += 1
+        selection = history[historyIndex]
+    }
+
+    private func recordHistory(_ pane: SettingsPane) {
+        if isNavigatingHistory {
+            isNavigatingHistory = false
+            return
+        }
+        if historyIndex < history.count - 1 {
+            history.removeSubrange((historyIndex + 1)...)
+        }
+        if history.last != pane {
+            history.append(pane)
+            historyIndex = history.count - 1
+        }
     }
 
     private func consumePendingPane() {
