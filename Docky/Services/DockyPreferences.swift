@@ -884,6 +884,43 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
+    /// Apple's classic paged Launchpad: a fixed grid per page, scrolls
+    /// horizontally one screenful at a time.
+    case horizontal
+    /// macOS Tahoe-style "Apps" view: a single continuous vertical
+    /// grid that scrolls freely without page boundaries.
+    case vertical
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .horizontal: String(localized: "Paged")
+        case .vertical: String(localized: "Continuous")
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .horizontal:
+            String(localized: "Apple's classic Launchpad: pages of icons that swipe horizontally with a page indicator below.")
+        case .vertical:
+            String(localized: "macOS Tahoe-style Apps view: one tall scrollable grid with no page boundaries. Rows are unused.")
+        }
+    }
+
+    /// Default for the current OS. macOS 26 (Tahoe) ships a vertical
+    /// Apps view in place of paged Launchpad; older systems keep the
+    /// paged layout so the upgrade isn't silently disruptive.
+    static var defaultForCurrentOS: LaunchpadLayoutAxis {
+        if #available(macOS 26.0, *) {
+            return .vertical
+        }
+        return .horizontal
+    }
+}
+
 @Observable final class DockyPreferences {
     static let shared = DockyPreferences()
 
@@ -2188,6 +2225,17 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// Scroll axis for the Launchpad overlay. `.horizontal` keeps the
+    /// classic Apple paged layout; `.vertical` renders a single
+    /// continuous grid (matches macOS Tahoe's Apps view). Row count is
+    /// only consulted in horizontal mode.
+    var launchpadLayoutAxis: LaunchpadLayoutAxis {
+        didSet {
+            guard launchpadLayoutAxis != oldValue else { return }
+            defaults.set(launchpadLayoutAxis.rawValue, forKey: Keys.launchpadLayoutAxis)
+        }
+    }
+
     /// Global shortcut that toggles Docky's Launchpad overlay.
     var launchpadShortcut: KeyboardShortcut {
         didSet {
@@ -3204,6 +3252,7 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         static let launchpadOverlayTransparency = "docky.launchpadOverlayTransparency"
         static let launchpadGridColumnCount = "docky.launchpadGridColumnCount"
         static let launchpadGridRowCount = "docky.launchpadGridRowCount"
+        static let launchpadLayoutAxis = "docky.launchpadLayoutAxis"
         static let launchpadShortcut = "docky.launchpadShortcut"
         static let enablesWindowSwitcher = "docky.enablesWindowSwitcher"
         static let windowSwitcherShortcut = "docky.windowSwitcherShortcut"
@@ -3293,6 +3342,7 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         static let launchpadOverlayTransparency: CGFloat = 0.4
         static let launchpadGridColumnCount = 7
         static let launchpadGridRowCount = 5
+        static let launchpadLayoutAxis: LaunchpadLayoutAxis = .defaultForCurrentOS
         static let launchpadShortcut = KeyboardShortcut.empty
         static let enablesWindowSwitcher = true
         static let windowSwitcherShortcut = KeyboardShortcut(keyCode: 48, modifierFlags: [.option])
@@ -3401,6 +3451,7 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         let storedLaunchpadOverlayTransparency = defaults.object(forKey: Keys.launchpadOverlayTransparency) as? Double
         let storedLaunchpadGridColumnCount = defaults.object(forKey: Keys.launchpadGridColumnCount) as? Int
         let storedLaunchpadGridRowCount = defaults.object(forKey: Keys.launchpadGridRowCount) as? Int
+        let storedLaunchpadLayoutAxis = defaults.string(forKey: Keys.launchpadLayoutAxis)
         let storedLaunchpadShortcut = defaults.data(forKey: Keys.launchpadShortcut)
         let storedEnablesWindowSwitcher = defaults.object(forKey: Keys.enablesWindowSwitcher) as? Bool
         let storedWindowSwitcherShortcut = defaults.data(forKey: Keys.windowSwitcherShortcut)
@@ -3517,6 +3568,9 @@ enum WindowSwitcherLayout: String, CaseIterable, Codable, Identifiable {
         ), 1)
         self.launchpadGridColumnCount = max(storedLaunchpadGridColumnCount ?? DefaultValues.launchpadGridColumnCount, 1)
         self.launchpadGridRowCount = max(storedLaunchpadGridRowCount ?? DefaultValues.launchpadGridRowCount, 1)
+        self.launchpadLayoutAxis = storedLaunchpadLayoutAxis
+            .flatMap(LaunchpadLayoutAxis.init(rawValue:))
+            ?? DefaultValues.launchpadLayoutAxis
         self.launchpadShortcut = Self.decodeKeyboardShortcut(from: storedLaunchpadShortcut) ?? DefaultValues.launchpadShortcut
         self.enablesWindowSwitcher = storedEnablesWindowSwitcher ?? DefaultValues.enablesWindowSwitcher
         self.windowSwitcherShortcut = Self.decodeKeyboardShortcut(from: storedWindowSwitcherShortcut) ?? DefaultValues.windowSwitcherShortcut

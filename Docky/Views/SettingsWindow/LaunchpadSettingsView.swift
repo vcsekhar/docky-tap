@@ -63,6 +63,29 @@ struct LaunchpadSettingsView: View {
             Section("Layout") {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
+                        Text("Scroll Direction")
+                            .font(.headline)
+
+                        Spacer()
+
+                        Picker("Scroll Direction", selection: $preferences.launchpadLayoutAxis) {
+                            ForEach(LaunchpadLayoutAxis.allCases) { axis in
+                                Text(axis.title).tag(axis)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .disabled(!product.isUnlocked(.launchpad) || !preferences.enablesLaunchpadOverlay)
+                    }
+
+                    Text(preferences.launchpadLayoutAxis.summary)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider()
+
+                    HStack {
                         Text("Grid Columns")
                             .font(.headline)
 
@@ -81,10 +104,14 @@ struct LaunchpadSettingsView: View {
 
                         Stepper("\(preferences.launchpadGridRowCount)", value: $preferences.launchpadGridRowCount, in: 1...10)
                             .foregroundStyle(.secondary)
-                            .disabled(!product.isUnlocked(.launchpad) || !preferences.enablesLaunchpadOverlay)
+                            // Rows are only consulted in paged mode;
+                            // vertical mode grows as long as needed.
+                            .disabled(!product.isUnlocked(.launchpad)
+                                      || !preferences.enablesLaunchpadOverlay
+                                      || preferences.launchpadLayoutAxis == .vertical)
                     }
 
-                    Text("Sets the Launchpad grid dimensions. Docky uses these counts when the icons fit on screen, defaulting to 7 columns × 5 rows.")
+                    Text("Sets the Launchpad grid dimensions. Docky uses these counts when the icons fit on screen, defaulting to 7 columns × 5 rows. Row count is ignored when scroll direction is continuous.")
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

@@ -245,6 +245,10 @@ private struct LaunchpadOverlayView: View {
     @State private var searchText = ""
     @State private var selectedEntryID: String?
     @State private var visiblePageID: String?
+    /// Source of truth for vertical-mode scroll position. Tracks the
+    /// entry currently anchored at the top of the viewport so we can
+    /// auto-scroll to follow keyboard selection.
+    @State private var visibleEntryID: String?
     @State private var expandedFolderID: String?
     @State private var renamingFolderID: String?
     @State private var renamingFolderDraft: String = ""
@@ -332,8 +336,13 @@ private struct LaunchpadOverlayView: View {
             let scaledRowSpacing = pageRows > 1
                 ? max(scaledMinRowSpacing, extraVertical / CGFloat(pageRows - 1))
                 : scaledMinRowSpacing
+            let isVertical = preferences.launchpadLayoutAxis == .vertical
             let pageSize = pageColumns * pageRows
-            let pages = paginate(displayedEntries, pageSize: pageSize)
+            let pages = isVertical ? [] : paginate(displayedEntries, pageSize: pageSize)
+            // In vertical mode no page indicator / chevrons render, so
+            // the bottom of the grid only needs the small ambient
+            // padding the chrome reserves around all edges.
+            let resolvedBottomInset = isVertical ? gridChromePadding : bottomInset
 
             ZStack {
                 wallpaperBackground(in: proxy.size)
@@ -345,41 +354,56 @@ private struct LaunchpadOverlayView: View {
                         overlay.dismiss()
                     }
 
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 0) {
-                            ForEach(pages.indices, id: \.self) { pageIndex in
-                                pageGrid(
-                                    pageEntries: pages[pageIndex],
-                                    cellWidth: cellWidth,
-                                    cellHeight: cellHeight,
-                                    iconSide: iconSize,
-                                    pageWidth: proxy.size.width,
-                                    columns: pageColumns,
-                                    columnSpacing: scaledColumnSpacing,
-                                    rowSpacing: scaledRowSpacing,
-                                    horizontalInset: scaledHorizontalInset
-                                )
-                                .id("page-\(pageIndex)")
+                if isVertical {
+                    verticalScrollView(
+                        cellWidth: cellWidth,
+                        cellHeight: cellHeight,
+                        iconSide: iconSize,
+                        columns: pageColumns,
+                        columnSpacing: scaledColumnSpacing,
+                        rowSpacing: scaledRowSpacing,
+                        horizontalInset: scaledHorizontalInset,
+                        topInset: topInset,
+                        bottomInset: resolvedBottomInset
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollViewReader { scrollProxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 0) {
+                                ForEach(pages.indices, id: \.self) { pageIndex in
+                                    pageGrid(
+                                        pageEntries: pages[pageIndex],
+                                        cellWidth: cellWidth,
+                                        cellHeight: cellHeight,
+                                        iconSide: iconSize,
+                                        pageWidth: proxy.size.width,
+                                        columns: pageColumns,
+                                        columnSpacing: scaledColumnSpacing,
+                                        rowSpacing: scaledRowSpacing,
+                                        horizontalInset: scaledHorizontalInset
+                                    )
+                                    .id("page-\(pageIndex)")
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        .scrollTargetBehavior(.paging)
+                        .scrollPosition(id: $visiblePageID, anchor: .leading)
+                        .scrollClipDisabled()
+                        .padding(.top, topInset)
+                        .padding(.bottom, resolvedBottomInset)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onChange(of: selectedEntryID) { selection in
+                            guard let selection,
+                                  let pageIndex = pageIndex(for: selection, in: pages) else { return }
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                scrollProxy.scrollTo("page-\(pageIndex)", anchor: .leading)
                             }
                         }
-                        .scrollTargetLayout()
-                    }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: $visiblePageID, anchor: .leading)
-                    .scrollClipDisabled()
-                    .padding(.top, topInset)
-                    .padding(.bottom, bottomInset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onChange(of: selectedEntryID) { selection in
-                        guard let selection,
-                              let pageIndex = pageIndex(for: selection, in: pages) else { return }
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            scrollProxy.scrollTo("page-\(pageIndex)", anchor: .leading)
+                        .onChange(of: filteredEntries.map(\.id)) { _ in
+                            synchronizeSelection()
                         }
-                    }
-                    .onChange(of: filteredEntries.map(\.id)) { _ in
-                        synchronizeSelection()
                     }
                 }
 
@@ -390,13 +414,17 @@ private struct LaunchpadOverlayView: View {
 
                     Spacer()
 
-                    pageIndicator(pageCount: pages.count, currentIndex: currentPageIndex(in: pages)) { index in
-                        scrollToPage(index: index, pageCount: pages.count)
+                    if !isVertical {
+                        pageIndicator(pageCount: pages.count, currentIndex: currentPageIndex(in: pages)) { index in
+                            scrollToPage(index: index, pageCount: pages.count)
+                        }
+                        .padding(.bottom, pageIndicatorBottomInset)
                     }
-                    .padding(.bottom, pageIndicatorBottomInset)
                 }
 
-                pageNavigationChevrons(pageCount: pages.count, currentIndex: currentPageIndex(in: pages))
+                if !isVertical {
+                    pageNavigationChevrons(pageCount: pages.count, currentIndex: currentPageIndex(in: pages))
+                }
 
                 if let renamingFolderID {
                     folderRenameOverlay(folderID: renamingFolderID)
@@ -457,7 +485,7 @@ private struct LaunchpadOverlayView: View {
             }
             .background {
                 LaunchpadOverlayKeyMonitor { event in
-                    handleKeyDown(event, columnCount: pageColumns)
+                    handleKeyDown(event, columnCount: pageColumns, rowCount: pageRows)
                 }
             }
             .onAppear {
@@ -544,6 +572,75 @@ private struct LaunchpadOverlayView: View {
                     overlay.dismiss()
                 }
         )
+    }
+
+    /// Vertical "Apps view"-style rendering: a single continuous
+    /// `LazyVGrid` of every `LaunchpadEntry`, scrolling freely.
+    ///
+    /// `topInset` / `bottomInset` are applied as `.contentMargins`
+    /// rather than outer paddings so the scroll viewport occupies
+    /// the full chrome area, content can scroll behind the search
+    /// bar and dock chrome, and `.scrollClipDisabled()` lets cells
+    /// render past the viewport edges without getting clipped (e.g.
+    /// during drag previews).
+    @ViewBuilder
+    private func verticalScrollView(
+        cellWidth: CGFloat,
+        cellHeight: CGFloat,
+        iconSide: CGFloat,
+        columns: Int,
+        columnSpacing: CGFloat,
+        rowSpacing: CGFloat,
+        horizontalInset: CGFloat,
+        topInset: CGFloat,
+        bottomInset: CGFloat
+    ) -> some View {
+        let gridColumns = Array(
+            repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing, alignment: .top),
+            count: columns
+        )
+
+        ScrollViewReader { scrollProxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 0) {
+                    Spacer(minLength: horizontalInset)
+
+                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: rowSpacing) {
+                        ForEach(displayedEntries) { entry in
+                            entryCell(
+                                for: entry,
+                                cellSize: CGSize(width: cellWidth, height: cellHeight),
+                                iconSide: iconSide
+                            )
+                            .frame(width: cellWidth, height: cellHeight)
+                            .id(entry.id)
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer(minLength: horizontalInset)
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+                .background(
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { overlay.dismiss() }
+                )
+            }
+            .scrollPosition(id: $visibleEntryID, anchor: .top)
+            .scrollClipDisabled()
+            .contentMargins(.top, topInset, for: .scrollContent)
+            .contentMargins(.bottom, bottomInset, for: .scrollContent)
+            .onChange(of: selectedEntryID) { selection in
+                guard let selection else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    scrollProxy.scrollTo(selection, anchor: .center)
+                }
+            }
+            .onChange(of: filteredEntries.map(\.id)) { _ in
+                synchronizeSelection()
+            }
+        }
     }
 
     /// Pick a color scheme based on what the user actually sees behind the
@@ -711,10 +808,14 @@ private struct LaunchpadOverlayView: View {
                 )
             }
         )
-        // simultaneousGesture so the Button's tap and our DragGesture
-        // can coexist — a quick click launches/opens, a sustained drag
-        // (>6pt) starts the reorder.
-        .simultaneousGesture(
+        // `highPriorityGesture` instead of `simultaneousGesture`: when
+        // the drag fires (finger moved more than `minimumDistance`),
+        // it consumes the event and the Button's tap action does
+        // *not* run, so dropping doesn't double as launching the app
+        // or opening the folder. A pure tap with no movement leaves
+        // the gesture inactive, so the Button still handles the
+        // click → launch/open path.
+        .highPriorityGesture(
             DragGesture(
                 minimumDistance: 6,
                 coordinateSpace: .named(Self.launchpadGridCoordinateSpace)
@@ -1107,10 +1208,11 @@ private struct LaunchpadOverlayView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .dockyGlass(.clear, in: Capsule())
+        .dockyGlass(in: Capsule())
+        .dockyGlassBorder(in: Capsule())
     }
 
-    private func handleKeyDown(_ event: NSEvent, columnCount: Int) -> Bool {
+    private func handleKeyDown(_ event: NSEvent, columnCount: Int, rowCount: Int) -> Bool {
         // The overlay's hosting view stays alive for the app's lifetime, so this
         // local monitor keeps firing while the overlay is hidden. Without the
         // guard, Enter while Docky is frontmost for any other reason (NSAlert,
@@ -1146,6 +1248,24 @@ private struct LaunchpadOverlayView: View {
         case 126:
             moveSelection(delta: -columnCount)
             return true
+        case 116:
+            // Page Up — jump by one screenful of rows. `rowCount` is
+            // the on-screen page rows for both modes; in vertical it
+            // approximates a "screenful" jump.
+            moveSelection(delta: -columnCount * max(1, rowCount))
+            return true
+        case 121:
+            // Page Down — symmetric with Page Up.
+            moveSelection(delta: columnCount * max(1, rowCount))
+            return true
+        case 115:
+            // Home — first entry.
+            moveSelection(toAbsoluteIndex: 0)
+            return true
+        case 119:
+            // End — last entry.
+            moveSelection(toAbsoluteIndex: Int.max)
+            return true
         default:
             return false
         }
@@ -1169,6 +1289,17 @@ private struct LaunchpadOverlayView: View {
         let currentIndex = filteredEntries.firstIndex { $0.id == selectedEntryID } ?? 0
         let newIndex = min(max(currentIndex + delta, 0), filteredEntries.count - 1)
         selectedEntryID = filteredEntries[newIndex].id
+        isSearchFocused = true
+    }
+
+    /// Like `moveSelection(delta:)` but jumps to an absolute index in
+    /// the visible list. Clamped to the valid range; pass `0` for
+    /// Home and `Int.max` for End.
+    private func moveSelection(toAbsoluteIndex index: Int) {
+        guard !filteredEntries.isEmpty else { return }
+
+        let clamped = min(max(index, 0), filteredEntries.count - 1)
+        selectedEntryID = filteredEntries[clamped].id
         isSearchFocused = true
     }
 
@@ -1336,6 +1467,7 @@ private struct LaunchpadFolderCard: View {
         return ZStack {
             Color.clear
                 .dockyGlass(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .dockyGlassBorder(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
 
             // LazyVGrid fills row-major from top-leading and stops at the
             // last app, so partially filled grids leave the trailing rows
