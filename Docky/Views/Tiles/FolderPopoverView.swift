@@ -395,9 +395,14 @@ struct FolderPopoverView: View {
         openInFinder(currentEntry.url)
     }
 
+    /// Closes the popover when a drag starts so the user gets the screen
+    /// real estate back while dragging. The AppKit drag session survives the
+    /// popover dismissal because the drag image is owned at the screen level
+    /// (same pattern as AppFolderTileView.beginDragOutOfFolder).
     private func dragItemProvider(for itemURL: URL) -> NSItemProvider {
         let provider = NSItemProvider(object: itemURL as NSURL)
         provider.suggestedName = displayName(for: itemURL)
+        isPresented = false
         return provider
     }
 
