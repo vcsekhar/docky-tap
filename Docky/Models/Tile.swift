@@ -100,7 +100,7 @@ struct StartMenuTile: Equatable {
     }
 }
 
-enum WidgetKind: String, CaseIterable, Codable, Identifiable {
+enum WidgetKind: Codable, Identifiable, Hashable {
     case calendar
     case calendarDate
     case reminders
@@ -109,6 +109,77 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
     case nowPlaying
     case weather
     case search
+    /// Widget supplied by a community bundle loaded at startup. The
+    /// associated value is the plugin's stable identifier (e.g.
+    /// "com.example.MyWidget"); the live registration is owned by
+    /// ExternalWidgetRegistry.
+    case external(String)
+
+    nonisolated static let builtInCases: [WidgetKind] = [
+        .calendar,
+        .calendarDate,
+        .reminders,
+        .batteries,
+        .systemStatus,
+        .nowPlaying,
+        .weather,
+        .search,
+    ]
+
+    /// Round-trips through DockyPreferences / persistence as a single
+    /// string. External widgets use an `external:<identifier>` prefix
+    /// so existing values stay valid and unknown values can be
+    /// detected by inspecting the prefix.
+    nonisolated var rawValue: String {
+        switch self {
+        case .calendar: "calendar"
+        case .calendarDate: "calendarDate"
+        case .reminders: "reminders"
+        case .batteries: "batteries"
+        case .systemStatus: "systemStatus"
+        case .nowPlaying: "nowPlaying"
+        case .weather: "weather"
+        case .search: "search"
+        case .external(let identifier): "external:\(identifier)"
+        }
+    }
+
+    nonisolated init?(rawValue: String) {
+        if rawValue.hasPrefix("external:") {
+            let identifier = String(rawValue.dropFirst("external:".count))
+            guard !identifier.isEmpty else { return nil }
+            self = .external(identifier)
+            return
+        }
+        switch rawValue {
+        case "calendar": self = .calendar
+        case "calendarDate": self = .calendarDate
+        case "reminders": self = .reminders
+        case "batteries": self = .batteries
+        case "systemStatus": self = .systemStatus
+        case "nowPlaying": self = .nowPlaying
+        case "weather": self = .weather
+        case "search": self = .search
+        default: return nil
+        }
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        guard let kind = WidgetKind(rawValue: raw) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown WidgetKind rawValue: \(raw)"
+            )
+        }
+        self = kind
+    }
 
     var id: String { rawValue }
 
@@ -130,6 +201,8 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             String(localized: "Weather")
         case .search:
             String(localized: "Search")
+        case .external(let identifier):
+            ExternalWidgetRegistry.shared.metadata(for: identifier)?.displayName ?? identifier
         }
     }
 
@@ -139,6 +212,8 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             [.one]
         case .calendar, .reminders, .batteries, .systemStatus, .nowPlaying, .weather, .search:
             TileSpan.allCases
+        case .external(let identifier):
+            ExternalWidgetRegistry.shared.metadata(for: identifier)?.supportedSpans ?? TileSpan.allCases
         }
     }
 
@@ -148,6 +223,8 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             WidgetExpansionExtent(widthTiles: 5, heightTiles: 2)
         case .calendar, .calendarDate, .reminders, .batteries, .systemStatus, .weather, .search:
             .standard
+        case .external(let identifier):
+            ExternalWidgetRegistry.shared.metadata(for: identifier)?.expansionExtent ?? .standard
         }
     }
 
@@ -162,6 +239,8 @@ enum WidgetKind: String, CaseIterable, Codable, Identifiable {
             true
         case .calendarDate, .search:
             false
+        case .external(let identifier):
+            ExternalWidgetRegistry.shared.metadata(for: identifier)?.isExpandable ?? false
         }
     }
 }

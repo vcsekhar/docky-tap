@@ -271,6 +271,8 @@ private struct DockEditorGalleryItem: Equatable, Identifiable {
             String(localized: "Shows current weather for your location.")
         case .search:
             String(localized: "Search the web, click to open Google in your default browser.")
+        case .external:
+            String(localized: "Community widget loaded from an external bundle.")
         }
     }
 
@@ -302,6 +304,8 @@ private struct DockEditorGalleryItem: Equatable, Identifiable {
                 "cloud.sun.fill"
             case .search:
                 "magnifyingglass"
+            case .external(let identifier):
+                ExternalWidgetRegistry.shared.metadata(for: identifier)?.systemImageName ?? "puzzlepiece.extension"
             }
         case .smartStack:
             "square.stack.3d.up"

@@ -105,7 +105,7 @@ enum WidgetCatalog {
         includesInSmartStack: false
     )
 
-    static let staticRegistrations: [WidgetRegistration] = [
+    static let builtInRegistrations: [WidgetRegistration] = [
         calendar,
         calendarDate,
         reminders,
@@ -116,8 +116,34 @@ enum WidgetCatalog {
         search,
     ]
 
-    static let paletteRegistrations: [WidgetRegistration] = staticRegistrations.filter(\.includesInPalette)
-    static let smartStackRegistrations: [WidgetRegistration] = staticRegistrations.filter(\.includesInSmartStack)
+    /// All available widget registrations, built-ins plus any external
+    /// bundles that ExternalWidgetLoader has registered. Computed (not
+    /// cached) so registrations discovered after first access still show
+    /// up the next time the palette refreshes.
+    static var staticRegistrations: [WidgetRegistration] {
+        builtInRegistrations + externalRegistrations()
+    }
+
+    static var paletteRegistrations: [WidgetRegistration] {
+        staticRegistrations.filter(\.includesInPalette)
+    }
+
+    static var smartStackRegistrations: [WidgetRegistration] {
+        staticRegistrations.filter(\.includesInSmartStack)
+    }
+
+    private static func externalRegistrations() -> [WidgetRegistration] {
+        ExternalWidgetRegistry.shared.registrations.map { registration in
+            let metadata = registration.metadata
+            return WidgetRegistration(
+                kind: .external(metadata.identifier),
+                ownerBundleIdentifier: metadata.identifier,
+                defaultSpan: metadata.defaultSpan,
+                includesInPalette: metadata.includesInPalette,
+                includesInSmartStack: metadata.includesInSmartStack
+            )
+        }
+    }
 
     /// Owner bundle identifiers that are *visible* in a freshly-inserted
     /// smart stack by default. Anything in `smartStackRegistrations`

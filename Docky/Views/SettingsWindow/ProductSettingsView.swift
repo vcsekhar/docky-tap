@@ -213,6 +213,8 @@ struct ProductSettingsView: View {
             "wand.and.stars"
         case .smartStack:
             "square.stack.3d.up.fill"
+        case .externalWidgets:
+            "bag.fill"
         case .widget:
             "rectangle.grid.2x2.fill"
         }

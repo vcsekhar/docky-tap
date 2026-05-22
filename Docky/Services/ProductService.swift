@@ -50,6 +50,7 @@ enum ProductFeature: Hashable, Identifiable {
     case groupedAppFolders
     case scriptedActions
     case smartStack
+    case externalWidgets
     case widget(WidgetKind)
 
     static let productSettingsFeatures: [ProductFeature] = [
@@ -59,6 +60,7 @@ enum ProductFeature: Hashable, Identifiable {
         .groupedAppFolders,
         .scriptedActions,
         .smartStack,
+        .externalWidgets,
     ]
 
     var id: String {
@@ -75,6 +77,8 @@ enum ProductFeature: Hashable, Identifiable {
             "scripted-actions"
         case .smartStack:
             "smart-stack"
+        case .externalWidgets:
+            "external-widgets"
         case .widget(let kind):
             "widget:\(kind.rawValue)"
         }
@@ -94,6 +98,8 @@ enum ProductFeature: Hashable, Identifiable {
             "Scripted Actions"
         case .smartStack:
             "Smart Stack"
+        case .externalWidgets:
+            "Custom Widgets"
         case .widget(let kind):
             "\(kind.title) Widget"
         }
@@ -113,6 +119,8 @@ enum ProductFeature: Hashable, Identifiable {
             "Catalog-backed AppleScript and menu-click actions for curated automation."
         case .smartStack:
             "Stacks available widgets into a single tile you can scroll through in the dock."
+        case .externalWidgets:
+            "Browse the marketplace, install community-built widgets, and load custom .dockywidget bundles in your dock."
         case .widget(let kind):
             "Adds the \(kind.title) widget to the dock or shows it in place of a supported app icon."
         }
@@ -120,7 +128,9 @@ enum ProductFeature: Hashable, Identifiable {
 
     var requiredTier: ProductTier {
         switch self {
-        case .launchpad, .windowSwitcher, .customAppIcons, .groupedAppFolders, .scriptedActions, .smartStack:
+        case .launchpad, .windowSwitcher, .customAppIcons, .groupedAppFolders, .scriptedActions, .smartStack, .externalWidgets:
+            .pro
+        case .widget(.external):
             .pro
         case .widget:
             .free
@@ -129,7 +139,7 @@ enum ProductFeature: Hashable, Identifiable {
 
     var supportsLockedExistingPlacement: Bool {
         switch self {
-        case .launchpad, .smartStack, .widget:
+        case .launchpad, .smartStack, .widget, .externalWidgets:
             true
         case .windowSwitcher, .customAppIcons, .groupedAppFolders, .scriptedActions:
             false

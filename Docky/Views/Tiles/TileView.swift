@@ -2155,6 +2155,14 @@ struct TileView: View {
             actions.append(.divider)
             actions.append(widgetRemovalAction(for: widget))
             return actions
+        case .external:
+            var actions: [ContextAction] = []
+            if let spanMenuAction = widgetSpanMenuAction(for: widget) {
+                actions.append(spanMenuAction)
+                actions.append(.divider)
+            }
+            actions.append(widgetRemovalAction(for: widget))
+            return actions
         }
     }
 
@@ -2306,6 +2314,8 @@ struct TileView: View {
                let url = URL(string: "https://www.google.com") {
                 NSWorkspace.shared.open(url)
             }
+        case .external:
+            break
         }
     }
 

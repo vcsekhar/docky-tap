@@ -46,6 +46,17 @@
 	<string>https://getdocky.com/releases/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>LfZUqraK4HiOj/+9iztgnWzdQTrC1ccmJPp/Fy/aTPc=</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Docky Widget Install</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>docky</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -77,6 +88,24 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>dockytheme</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.docky.widget</string>
+			<key>UTTypeDescription</key>
+			<string>Docky Widget Bundle</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.bundle</string>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>dockywidget</string>
 				</array>
 			</dict>
 		</dict>
