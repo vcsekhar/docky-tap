@@ -2514,6 +2514,21 @@ private struct FolderListMenuPresenter: NSViewRepresentable {
     }
 
     final class Coordinator: NSObject, NSMenuDelegate {
+        /// Estimated height (pt) per NSMenuItem row that carries a 16x16 image
+        /// + single-line title. Used to derive how many items fit in the
+        /// menu's screen before macOS would force scroll arrows.
+        private static let menuRowHeight: CGFloat = 22
+        /// Vertical padding reserved for: menu top/bottom inset, the
+        /// "Open in Finder" item + separator, the "Show More" item itself.
+        private static let reservedMenuChrome: CGFloat = 72
+        /// Hard floor so we never collapse the menu absurdly small even on
+        /// a tiny external display.
+        private static let minimumInlineItemLimit: Int = 20
+        /// Extra rows shaved off the fits-on-screen count so the menu
+        /// doesn't kiss the screen edge — keeps the "Show More" item
+        /// comfortably above the bottom of the visible area.
+        private static let inlineItemSafetyMargin: Int = 5
+
         private var tile: FolderTile
         private var isPresented: Binding<Bool>
         private var preferredEdge: NSRectEdge
@@ -2521,6 +2536,7 @@ private struct FolderListMenuPresenter: NSViewRepresentable {
         private var isShowing = false
         private var isInterruptingAutohide = false
         private var folderURLByMenuID: [ObjectIdentifier: URL] = [:]
+        private var inlineItemLimit: Int = 60
 
         init(tile: FolderTile, isPresented: Binding<Bool>, preferredEdge: NSRectEdge) {
             self.tile = tile
@@ -2542,6 +2558,10 @@ private struct FolderListMenuPresenter: NSViewRepresentable {
             isShowing = true
             beginAutohideInterruption(for: view)
             folderURLByMenuID.removeAll()
+            inlineItemLimit = Self.computeInlineItemLimit(
+                for: view.window?.screen ?? NSScreen.main,
+                dockWindowFrame: view.window?.frame
+            )
             let menu = buildMenu(for: tile.url, title: tile.displayName)
             popUp(menu: menu, in: view)
             endAutohideInterruption()
@@ -2575,6 +2595,18 @@ private struct FolderListMenuPresenter: NSViewRepresentable {
                     let emptyItem = NSMenuItem(title: "No visible items", action: nil, keyEquivalent: "")
                     emptyItem.isEnabled = false
                     menu.addItem(emptyItem)
+                } else if sortedItemURLs.count > inlineItemLimit {
+                    for itemURL in sortedItemURLs.prefix(inlineItemLimit) {
+                        menu.addItem(menuItem(for: itemURL))
+                    }
+                    let overflowCount = sortedItemURLs.count - inlineItemLimit
+                    let showMoreItem = NSMenuItem(title: "Show More (\(overflowCount))", action: nil, keyEquivalent: "")
+                    let overflowMenu = NSMenu(title: showMoreItem.title)
+                    for itemURL in sortedItemURLs.dropFirst(inlineItemLimit) {
+                        overflowMenu.addItem(menuItem(for: itemURL))
+                    }
+                    showMoreItem.submenu = overflowMenu
+                    menu.addItem(showMoreItem)
                 } else {
                     for itemURL in sortedItemURLs {
                         menu.addItem(menuItem(for: itemURL))
@@ -2612,6 +2644,20 @@ private struct FolderListMenuPresenter: NSViewRepresentable {
             }
 
             return item
+        }
+
+        private static func computeInlineItemLimit(for screen: NSScreen?, dockWindowFrame: CGRect?) -> Int {
+            let visibleHeight = screen?.visibleFrame.height ?? 800
+            // Only subtract dock chrome when Docky is horizontal (top/bottom) —
+            // a vertical dock spans the screen's height and doesn't shrink
+            // the menu's vertical headroom.
+            let dockChromeHeight: CGFloat = {
+                guard let dockWindowFrame else { return 0 }
+                return dockWindowFrame.width > dockWindowFrame.height ? dockWindowFrame.height : 0
+            }()
+            let usableHeight = max(0, visibleHeight - reservedMenuChrome - dockChromeHeight)
+            let fittedCount = Int((usableHeight / menuRowHeight).rounded(.down))
+            return max(minimumInlineItemLimit, fittedCount - inlineItemSafetyMargin)
         }
 
         private func listMenuIcon(for itemURL: URL) -> NSImage {
