@@ -1920,6 +1920,18 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// Hides the profile switcher strip even when more than one profile
+    /// exists. When `false` (default), the strip still hides itself
+    /// automatically while only the "Default" profile is around;
+    /// `ProfileSwitcherWindowController` observes both this flag and
+    /// the live profile count to drive show/hide.
+    var hidesProfileStrip: Bool {
+        didSet {
+            guard hidesProfileStrip != oldValue else { return }
+            defaults.set(hidesProfileStrip, forKey: Keys.hidesProfileStrip)
+        }
+    }
+
     /// Shape used for the active app indicator.
     var activeIndicatorShape: DockTileIndicatorShape {
         didSet {
@@ -3362,6 +3374,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         static let shelveHidesFinder = "docky.shelveHidesFinder"
         static let shelveHidesTrash = "docky.shelveHidesTrash"
         static let hidesRecentApps = "docky.hidesRecentApps"
+        static let hidesProfileStrip = "docky.hidesProfileStrip"
         static let appTileFrontmostClickBehavior = "docky.appTileFrontmostClickBehavior"
         static let activeIndicatorShape = "docky.activeIndicatorShape"
         static let activeIndicatorImagePath = "docky.activeIndicatorImagePath"
@@ -3459,6 +3472,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         static let shelveHidesFinder = true
         static let shelveHidesTrash = true
         static let hidesRecentApps = false
+        static let hidesProfileStrip = false
         static let appTileFrontmostClickBehavior: AppTileFrontmostClickBehavior = .none
         static let activeIndicatorShape: DockTileIndicatorShape = .dot
         static let activeIndicatorImagePath: String? = nil
@@ -3575,6 +3589,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         let storedShelveHidesFinder = defaults.object(forKey: Keys.shelveHidesFinder) as? Bool
         let storedShelveHidesTrash = defaults.object(forKey: Keys.shelveHidesTrash) as? Bool
         let storedHidesRecentApps = defaults.object(forKey: Keys.hidesRecentApps) as? Bool
+        let storedHidesProfileStrip = defaults.object(forKey: Keys.hidesProfileStrip) as? Bool
         let storedAppTileFrontmostClickBehavior = defaults.string(forKey: Keys.appTileFrontmostClickBehavior)
         let storedActiveIndicatorShape = defaults.string(forKey: Keys.activeIndicatorShape)
         let storedActiveIndicatorImagePath = defaults.string(forKey: Keys.activeIndicatorImagePath)
@@ -3693,6 +3708,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         self.shelveHidesFinder = storedShelveHidesFinder ?? DefaultValues.shelveHidesFinder
         self.shelveHidesTrash = storedShelveHidesTrash ?? DefaultValues.shelveHidesTrash
         self.hidesRecentApps = storedHidesRecentApps ?? DefaultValues.hidesRecentApps
+        self.hidesProfileStrip = storedHidesProfileStrip ?? DefaultValues.hidesProfileStrip
         self.appTileFrontmostClickBehavior = storedAppTileFrontmostClickBehavior
             .flatMap(AppTileFrontmostClickBehavior.init(rawValue:))
             ?? DefaultValues.appTileFrontmostClickBehavior
