@@ -259,10 +259,17 @@ private struct LaunchpadOverlayView: View {
     @State private var expandedFolderRenameDraft: String = ""
     @State private var dragState: LaunchpadDragState?
     @State private var cellFrames: [String: CGRect] = [:]
+    /// Tile the cursor is currently dwelling over for a potential
+    /// folder-merge, plus the timer that promotes it. Reorder tracks
+    /// the cursor live; merge only kicks in after the cursor rests on
+    /// one tile for `mergeDwellDuration`.
+    @State private var pendingMergeHoverID: String?
+    @State private var mergeDwellTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isRenameFocused: Bool
 
     private static let launchpadGridCoordinateSpace = "launchpadGrid"
+    private let mergeDwellDuration: TimeInterval = 0.45
 
     private let searchBarWidth: CGFloat = 280
     private let searchBarTopInset: CGFloat = 56
@@ -959,17 +966,21 @@ private struct LaunchpadOverlayView: View {
         guard var state = dragState else { return }
         state.location = value.location
         let resolution = resolveDropTarget(at: value.location, draggedLayoutID: layoutID)
+        let hoveredID = resolution.directHitID
 
-        // Cursor in the middle band of a target cell ⇒ merge mode:
-        // freeze the live shift and highlight the target. Cursor in
-        // the side bands or in a gap ⇒ live shift, no merge.
-        if let candidate = resolution.mergeCandidateID, candidate != layoutID {
-            state.mergeTargetItemID = candidate
-            // Don't update targetIndex — keep displayedEntries frozen
-            // so the target stays under the cursor.
+        if let merge = state.mergeTargetItemID, merge == hoveredID {
+            // Dwell already promoted this tile to a merge target and the
+            // cursor is still on it — keep the grid frozen and the
+            // target highlighted, no reflow.
         } else {
+            // Reorder tracks the cursor live: the dragged item slides to
+            // the midpoint-derived index every move. Folder-merge is no
+            // longer position-gated; it arms a dwell timer on whatever
+            // tile the cursor is directly over and fires only if the
+            // cursor rests there.
             state.mergeTargetItemID = nil
             state.targetIndex = resolution.insertionIndex
+            armMergeDwell(forHovered: hoveredID, layoutID: layoutID)
         }
 
         withAnimation(.spring(duration: 0.32, bounce: 0.18)) {
@@ -977,7 +988,40 @@ private struct LaunchpadOverlayView: View {
         }
     }
 
+    /// (Re)arms the folder-merge dwell timer. Passing the same hovered
+    /// tile preserves the running timer; a different tile (or a gap)
+    /// cancels it and starts fresh. The timer promotes the tile to a
+    /// merge target only if the cursor is still resting on it when it
+    /// fires.
+    private func armMergeDwell(forHovered hoveredID: String?, layoutID: String) {
+        guard let hoveredID, hoveredID != layoutID else {
+            cancelMergeDwell()
+            return
+        }
+        guard hoveredID != pendingMergeHoverID else { return }
+        pendingMergeHoverID = hoveredID
+        mergeDwellTask?.cancel()
+        mergeDwellTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(mergeDwellDuration))
+            guard !Task.isCancelled,
+                  pendingMergeHoverID == hoveredID,
+                  var state = dragState,
+                  state.layoutItemID == layoutID else { return }
+            state.mergeTargetItemID = hoveredID
+            withAnimation(.spring(duration: 0.22, bounce: 0.18)) {
+                dragState = state
+            }
+        }
+    }
+
+    private func cancelMergeDwell() {
+        pendingMergeHoverID = nil
+        mergeDwellTask?.cancel()
+        mergeDwellTask = nil
+    }
+
     private func handleDragEnd(layoutID: String, value: DragGesture.Value) {
+        cancelMergeDwell()
         defer {
             withAnimation(.spring(duration: 0.28, bounce: 0.2)) {
                 dragState = nil
@@ -1001,17 +1045,20 @@ private struct LaunchpadOverlayView: View {
 
     private struct DropResolution {
         let insertionIndex: Int
-        let mergeCandidateID: String?
+        /// Tile the cursor is *directly inside* (excluding the dragged
+        /// one), or nil when the cursor is in a gap / only near a tile.
+        /// Feeds the merge-dwell timer; reordering uses `insertionIndex`
+        /// regardless.
+        let directHitID: String?
     }
 
-    /// Maps a cursor location to an insertion index and (when the
-    /// cursor lies over a single cell's center) a merge candidate
-    /// id. The merge candidate is whichever tile the cursor is
-    /// directly over — the dwell timer decides whether the drop
-    /// becomes a folder merge.
+    /// Maps a cursor location to an insertion index plus the tile the
+    /// cursor is directly over (if any). Reorder consumes the index on
+    /// every move; the directly-hit tile only matters as the dwell
+    /// candidate for a folder merge.
     private func resolveDropTarget(at location: CGPoint, draggedLayoutID: String) -> DropResolution {
         let entries = filteredEntries
-        guard !entries.isEmpty else { return DropResolution(insertionIndex: 0, mergeCandidateID: nil) }
+        guard !entries.isEmpty else { return DropResolution(insertionIndex: 0, directHitID: nil) }
 
         // Find which cell the cursor is over (excluding the dragged
         // cell so it doesn't keep flagging itself as a merge candidate).
@@ -1037,19 +1084,15 @@ private struct LaunchpadOverlayView: View {
         }
 
         let hit = directHit ?? nearestHit.map { (entryIndex: $0.entryIndex, frame: $0.frame, id: $0.id) }
-        guard let hit else { return DropResolution(insertionIndex: entries.count, mergeCandidateID: nil) }
-
-        // Center 60% of the cell width => merge candidate. The outer
-        // 20% on each side stays as the reorder zone so users can
-        // still insert tiles between neighbours.
-        let centerBand = hit.frame.insetBy(dx: hit.frame.width * 0.20, dy: 0)
-        let mergeID = (directHit != nil && centerBand.minX...centerBand.maxX ~= location.x) ? hit.id : nil
+        guard let hit else { return DropResolution(insertionIndex: entries.count, directHitID: nil) }
 
         // Insertion index: before this cell if cursor left of midX,
         // after otherwise. The caller adjusts for the dragged item's
-        // own position when rendering the preview.
+        // own position when rendering the preview. `directHitID` is only
+        // populated on a real containment hit so the dwell timer never
+        // arms on a tile the cursor is merely near.
         let insertion = location.x < hit.frame.midX ? hit.entryIndex : hit.entryIndex + 1
-        return DropResolution(insertionIndex: insertion, mergeCandidateID: mergeID)
+        return DropResolution(insertionIndex: insertion, directHitID: directHit?.id)
     }
 
     private func performMerge(draggedLayoutID: String, targetLayoutID: String) {
@@ -1214,7 +1257,10 @@ private struct LaunchpadOverlayView: View {
 
     private var filteredEntries: [LaunchpadEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return overlay.entries }
+        // No query: honor the user's chosen sort. While searching we
+        // keep relevance ordering instead, since that's what the user
+        // is reaching for.
+        guard !query.isEmpty else { return sortedEntries(overlay.entries) }
 
         return overlay.entries
             .compactMap { entry -> (entry: LaunchpadEntry, score: Int)? in
@@ -1230,6 +1276,55 @@ private struct LaunchpadOverlayView: View {
                 return lhs.entry.displayName.localizedCaseInsensitiveCompare(rhs.entry.displayName) == .orderedAscending
             }
             .map(\.entry)
+    }
+
+    /// Applies the user's `launchpadSortMode` to the resolved entries.
+    /// `.manual` is a passthrough (preserves the drag-arranged layout);
+    /// date sorts order newest-first and fall back to name as a stable
+    /// tiebreaker.
+    private func sortedEntries(_ entries: [LaunchpadEntry]) -> [LaunchpadEntry] {
+        switch preferences.launchpadSortMode {
+        case .manual:
+            return entries
+        case .name:
+            return entries.sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+        case .dateCreated:
+            return entries.sorted { compareByDate($0, $1, \.created) }
+        case .dateModified:
+            return entries.sorted { compareByDate($0, $1, \.modified) }
+        }
+    }
+
+    private func compareByDate(
+        _ lhs: LaunchpadEntry,
+        _ rhs: LaunchpadEntry,
+        _ keyPath: KeyPath<LaunchpadAppDates, Date>
+    ) -> Bool {
+        let lhsDate = representativeDate(for: lhs, keyPath)
+        let rhsDate = representativeDate(for: rhs, keyPath)
+        if lhsDate != rhsDate {
+            return lhsDate > rhsDate
+        }
+        return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+    }
+
+    /// Date used to sort an entry. Apps read their own bundle date;
+    /// folders use their most-recent member so a folder containing a
+    /// freshly-installed app sorts up alongside it.
+    private func representativeDate(
+        for entry: LaunchpadEntry,
+        _ keyPath: KeyPath<LaunchpadAppDates, Date>
+    ) -> Date {
+        switch entry {
+        case .app(let app):
+            return overlay.appDatesByBundleID[app.bundleIdentifier]?[keyPath: keyPath] ?? .distantPast
+        case .folder(let folder):
+            return folder.apps
+                .compactMap { overlay.appDatesByBundleID[$0.bundleIdentifier]?[keyPath: keyPath] }
+                .max() ?? .distantPast
+        }
     }
 
     private func matchScore(for entry: LaunchpadEntry, query: String) -> Int {
@@ -1288,15 +1383,35 @@ private struct LaunchpadOverlayView: View {
                 .buttonStyle(.plain)
             }
 
-            Button {
-                LaunchpadInspectorService.shared.toggle()
+            Menu {
+                Picker("Sort", selection: $preferences.launchpadSortMode) {
+                    ForEach(LaunchpadSortMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.inline)
+
+                Picker("Navigation", selection: $preferences.launchpadLayoutAxis) {
+                    ForEach(LaunchpadLayoutAxis.allCases) { axis in
+                        Text(axis.title).tag(axis)
+                    }
+                }
+                .pickerStyle(.inline)
+
+                Section {
+                    Button("Launchpad Settings…") {
+                        LaunchpadInspectorService.shared.toggle()
+                    }
+                }
             } label: {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.primary.opacity(0.7))
             }
-            .buttonStyle(.plain)
-            .help("Launchpad Settings")
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Launchpad Options")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

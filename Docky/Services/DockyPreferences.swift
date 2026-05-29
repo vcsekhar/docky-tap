@@ -938,6 +938,28 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+/// How Launchpad orders its top-level entries. `.manual` preserves the
+/// user's drag-arranged layout; the others sort the grid on the fly
+/// without mutating the persisted layout, so switching back to
+/// `.manual` restores the custom order untouched.
+enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
+    case manual
+    case name
+    case dateCreated
+    case dateModified
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .manual: String(localized: "Default")
+        case .name: String(localized: "Alphabetical")
+        case .dateCreated: String(localized: "Date Created")
+        case .dateModified: String(localized: "Date Modified")
+        }
+    }
+}
+
 @Observable final class DockyPreferences {
     static let shared = DockyPreferences()
 
@@ -2390,6 +2412,16 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// Sort order applied to the Launchpad grid. Display-only — never
+    /// mutates the persisted layout, so `.manual` always restores the
+    /// user's drag-arranged order.
+    var launchpadSortMode: LaunchpadSortMode {
+        didSet {
+            guard launchpadSortMode != oldValue else { return }
+            defaults.set(launchpadSortMode.rawValue, forKey: Keys.launchpadSortMode)
+        }
+    }
+
     /// Global shortcut that toggles Docky's Launchpad overlay.
     var launchpadShortcut: KeyboardShortcut {
         didSet {
@@ -3504,6 +3536,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         static let launchpadBackgroundImagePath = "docky.launchpadBackgroundImagePath"
         static let launchpadBackgroundBlursImage = "docky.launchpadBackgroundBlursImage"
         static let launchpadLayoutAxis = "docky.launchpadLayoutAxis"
+        static let launchpadSortMode = "docky.launchpadSortMode"
         static let launchpadShortcut = "docky.launchpadShortcut"
         static let enablesWindowSwitcher = "docky.enablesWindowSwitcher"
         static let includesMinimizedWindows = "docky.includesMinimizedWindows"
@@ -3611,6 +3644,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         static let launchpadBackgroundImagePath: String? = nil
         static let launchpadBackgroundBlursImage = true
         static let launchpadLayoutAxis: LaunchpadLayoutAxis = .defaultForCurrentOS
+        static let launchpadSortMode: LaunchpadSortMode = .manual
         static let launchpadShortcut = KeyboardShortcut.empty
         static let enablesWindowSwitcher = true
         static let includesMinimizedWindows = true
@@ -3733,6 +3767,7 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         let storedLaunchpadBackgroundImagePath = defaults.string(forKey: Keys.launchpadBackgroundImagePath)
         let storedLaunchpadBackgroundBlursImage = defaults.object(forKey: Keys.launchpadBackgroundBlursImage) as? Bool
         let storedLaunchpadLayoutAxis = defaults.string(forKey: Keys.launchpadLayoutAxis)
+        let storedLaunchpadSortMode = defaults.string(forKey: Keys.launchpadSortMode)
         let storedLaunchpadShortcut = defaults.data(forKey: Keys.launchpadShortcut)
         let storedEnablesWindowSwitcher = defaults.object(forKey: Keys.enablesWindowSwitcher) as? Bool
         let storedIncludesMinimizedWindows = defaults.object(forKey: Keys.includesMinimizedWindows) as? Bool
@@ -3877,6 +3912,9 @@ enum LaunchpadLayoutAxis: String, CaseIterable, Codable, Identifiable {
         self.launchpadLayoutAxis = storedLaunchpadLayoutAxis
             .flatMap(LaunchpadLayoutAxis.init(rawValue:))
             ?? DefaultValues.launchpadLayoutAxis
+        self.launchpadSortMode = storedLaunchpadSortMode
+            .flatMap(LaunchpadSortMode.init(rawValue:))
+            ?? DefaultValues.launchpadSortMode
         self.launchpadShortcut = Self.decodeKeyboardShortcut(from: storedLaunchpadShortcut) ?? DefaultValues.launchpadShortcut
         self.enablesWindowSwitcher = storedEnablesWindowSwitcher ?? DefaultValues.enablesWindowSwitcher
         self.includesMinimizedWindows = storedIncludesMinimizedWindows ?? DefaultValues.includesMinimizedWindows
