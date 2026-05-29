@@ -1751,6 +1751,16 @@ private struct LaunchpadFolderCard: View {
 /// Reuses the launchpad's grid+pagination idea inside a glass card. The
 /// outer ZStack catches taps for outside-of-card dismiss, so clicking the
 /// blurred backdrop closes the folder without dismissing the launchpad.
+/// In-flight reorder state for dragging an app inside the expanded
+/// folder. `targetIndex` is the post-removal insertion index, matching
+/// the top-level launchpad reorder convention.
+private struct FolderReorderDragState: Equatable {
+    let bundleIdentifier: String
+    let originIndex: Int
+    var targetIndex: Int
+    var location: CGPoint
+}
+
 private struct ExpandedFolderOverlay: View {
     let folder: AppFolderTile
     /// Layout-level folder ID (the raw UUID without the `virtual:`
@@ -1784,8 +1794,11 @@ private struct ExpandedFolderOverlay: View {
     let onCommitRename: () -> Void
 
     @State private var visiblePageID: String?
+    @State private var reorderDragState: FolderReorderDragState?
+    @State private var cellFrames: [String: CGRect] = [:]
     @FocusState private var isRenameFieldFocused: Bool
 
+    private static let gridCoordinateSpace = "launchpadFolderGrid"
     private let titleSpacing: CGFloat = 20
     private let indicatorAreaHeight: CGFloat = 32
     /// Tight gaps inside the card so icons can grow into the freed space.
@@ -1809,7 +1822,7 @@ private struct ExpandedFolderOverlay: View {
             // resolution. The card grows to fit `columnsPerPage` cells
             // horizontally; vertically it hugs the rows actually used.
             let cellSize = sourceCellSize
-            let pages = paginate(folder.apps, pageSize: pageSize)
+            let pages = paginate(displayedApps, pageSize: pageSize)
             let maxAppsOnAnyPage = pages.map(\.count).max() ?? 0
             let usedRows = max(1, Int(ceil(Double(maxAppsOnAnyPage) / Double(max(columnsPerPage, 1)))))
             let needsIndicator = pages.count > 1
@@ -1933,6 +1946,22 @@ private struct ExpandedFolderOverlay: View {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(.white.opacity(0.1), lineWidth: 1)
         }
+        .coordinateSpace(name: Self.gridCoordinateSpace)
+        .onPreferenceChange(LaunchpadCellFramePreference.self) { frames in
+            cellFrames = frames
+        }
+        // The dragged icon rides above the grid at the cursor while the
+        // remaining icons reflow underneath. No placeholder ghost in the
+        // origin slot — same as the top-level launchpad reorder.
+        .overlay {
+            if let state = reorderDragState,
+               let app = folder.apps.first(where: { $0.bundleIdentifier == state.bundleIdentifier }) {
+                LaunchpadAppCard(app: app, cellSize: cellSize, iconSide: sourceIconSide)
+                    .frame(width: cellSize.width, height: cellSize.height)
+                    .position(state.location)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private func pageGrid(apps: [AppTile], cellSize: CGSize, pageWidth: CGFloat) -> some View {
@@ -1953,8 +1982,29 @@ private struct ExpandedFolderOverlay: View {
                         onLaunch(app)
                     } label: {
                         LaunchpadAppCard(app: app, cellSize: cellSize, iconSide: sourceIconSide)
+                            .opacity(reorderDragState?.bundleIdentifier == app.bundleIdentifier ? 0 : 1)
                     }
                     .buttonStyle(.plain)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: LaunchpadCellFramePreference.self,
+                                value: [app.bundleIdentifier: proxy.frame(in: .named(Self.gridCoordinateSpace))]
+                            )
+                        }
+                    )
+                    .highPriorityGesture(
+                        DragGesture(
+                            minimumDistance: 6,
+                            coordinateSpace: .named(Self.gridCoordinateSpace)
+                        )
+                        .onChanged { value in
+                            handleFolderReorderChange(bundleIdentifier: app.bundleIdentifier, value: value)
+                        }
+                        .onEnded { value in
+                            handleFolderReorderEnd(bundleIdentifier: app.bundleIdentifier, value: value)
+                        }
+                    )
                     .contextMenu {
                         Button("Remove from Folder", role: .destructive) {
                             LaunchpadLayoutService.shared.removeFromFolder(bundleID: app.bundleIdentifier)
@@ -1974,6 +2024,84 @@ private struct ExpandedFolderOverlay: View {
         return stride(from: 0, to: apps.count, by: pageSize).map { offset in
             Array(apps[offset..<min(offset + pageSize, apps.count)])
         }
+    }
+
+    /// Folder apps in render order. Passthrough at rest; mid-drag the
+    /// dragged app is lifted out and re-inserted at `targetIndex` so the
+    /// rest reflow to make room. Mirrors the top-level launchpad reorder.
+    private var displayedApps: [AppTile] {
+        guard let state = reorderDragState else { return folder.apps }
+        var apps = folder.apps
+        guard let currentIndex = apps.firstIndex(where: { $0.bundleIdentifier == state.bundleIdentifier }) else {
+            return apps
+        }
+        let item = apps.remove(at: currentIndex)
+        let clamped = max(0, min(state.targetIndex, apps.count))
+        apps.insert(item, at: clamped)
+        return apps
+    }
+
+    private func handleFolderReorderChange(bundleIdentifier: String, value: DragGesture.Value) {
+        if reorderDragState == nil {
+            guard let originIndex = folder.apps.firstIndex(where: { $0.bundleIdentifier == bundleIdentifier }) else { return }
+            reorderDragState = FolderReorderDragState(
+                bundleIdentifier: bundleIdentifier,
+                originIndex: originIndex,
+                targetIndex: originIndex,
+                location: value.location
+            )
+        }
+        guard var state = reorderDragState else { return }
+        state.location = value.location
+        state.targetIndex = folderInsertionIndex(at: value.location, draggedBundleID: bundleIdentifier)
+        withAnimation(.spring(duration: 0.32, bounce: 0.18)) {
+            reorderDragState = state
+        }
+    }
+
+    private func handleFolderReorderEnd(bundleIdentifier: String, value: DragGesture.Value) {
+        defer {
+            withAnimation(.spring(duration: 0.28, bounce: 0.2)) {
+                reorderDragState = nil
+            }
+        }
+        guard let state = reorderDragState, state.bundleIdentifier == bundleIdentifier else { return }
+        guard state.targetIndex != state.originIndex else { return }
+        LaunchpadLayoutService.shared.moveAppInFolder(
+            folderID: folderLayoutID,
+            bundleID: bundleIdentifier,
+            toIndex: state.targetIndex
+        )
+    }
+
+    /// Post-removal insertion index for the cursor location, resolved
+    /// against the captured cell frames. No merge band — folders can't
+    /// nest, so this is pure reorder.
+    private func folderInsertionIndex(at location: CGPoint, draggedBundleID: String) -> Int {
+        let apps = folder.apps
+        guard !apps.isEmpty else { return 0 }
+
+        var directHit: (index: Int, frame: CGRect)?
+        var nearestHit: (index: Int, frame: CGRect, distance: CGFloat)?
+        for (index, app) in apps.enumerated() {
+            guard app.bundleIdentifier != draggedBundleID,
+                  let frame = cellFrames[app.bundleIdentifier] else { continue }
+            if frame.contains(location) {
+                directHit = (index, frame)
+                break
+            }
+            let dx = location.x - frame.midX
+            let dy = location.y - frame.midY
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if nearestHit == nil || distance < nearestHit!.distance {
+                nearestHit = (index, frame, distance)
+            }
+        }
+
+        let hit = directHit ?? nearestHit.map { (index: $0.index, frame: $0.frame) }
+        guard let hit else { return apps.count - 1 }
+        let insertion = location.x < hit.frame.midX ? hit.index : hit.index + 1
+        return max(0, min(insertion, apps.count - 1))
     }
 
     @ViewBuilder
