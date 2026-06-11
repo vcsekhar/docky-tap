@@ -9,8 +9,17 @@ struct LicensingView: View {
     @ObservedObject private var product = ProductService.shared
     @State private var licenseKey: String = ""
     @State private var trialEmail: String = ""
+    /// Section to scroll to / focus when the window first opens, set by the
+    /// CTA that presented it. Defaults to the license form.
+    var initialFocus: LicensingSection = .license
+    @FocusState private var isTrialEmailFocused: Bool
+
+    private enum Anchor: Hashable {
+        case trial
+    }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 statusCard
@@ -48,6 +57,7 @@ struct LicensingView: View {
                         TextField("Email Address", text: $trialEmail)
                             .textFieldStyle(.roundedBorder)
                             .textContentType(.emailAddress)
+                            .focused($isTrialEmailFocused)
                             .disabled(product.isStartingTrial || product.currentTier == .pro)
 
                         Text("Trial eligibility is checked online and can only be used once per email.")
@@ -74,6 +84,7 @@ struct LicensingView: View {
                         }
                     }
                 }
+                .id(Anchor.trial)
 
                 if product.hasStoredLicenseKey || product.currentTier == .pro {
                     section(title: "Manage Registration") {
@@ -97,6 +108,15 @@ struct LicensingView: View {
         .frame(minWidth: 440, idealWidth: 480, minHeight: 420, idealHeight: 520)
         .onAppear {
             trialEmail = product.trialEmail
+            // When opened via the trial CTA, jump to and focus the trial
+            // form so the user lands on it instead of the license field.
+            if initialFocus == .trial, product.currentTier != .pro {
+                DispatchQueue.main.async {
+                    withAnimation { proxy.scrollTo(Anchor.trial, anchor: .top) }
+                    isTrialEmailFocused = true
+                }
+            }
+        }
         }
     }
 

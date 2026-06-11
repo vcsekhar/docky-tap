@@ -136,15 +136,16 @@ struct ProductSettingsView: View {
                 } label: {
                     Text("Get Docky Pro")
                         .font(.headline)
+                        .foregroundStyle(.black)
                         .frame(maxWidth: .infinity, minHeight: Self.ctaButtonHeight)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(.purple)
+                .tint(.yellow)
             }
 
             Button {
-                LicensingWindowController.present()
+                LicensingWindowController.present(focus: .license)
             } label: {
                 Text(product.currentTier == .pro ? "Manage License…" : "I Already Have a License")
                     .font(.subheadline.weight(.semibold))
@@ -152,6 +153,17 @@ struct ProductSettingsView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
+
+            if product.currentTier != .pro {
+                Button {
+                    LicensingWindowController.present(focus: .trial)
+                } label: {
+                    Text("Start Free Trial")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .tint(.primary.opacity(0.6))
+            }
         }
     }
 

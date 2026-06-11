@@ -6,11 +6,19 @@
 import AppKit
 import SwiftUI
 
+/// Which section the licensing window should land on when opened, so the
+/// CTA that brought the user here (buy / trial / existing license) points
+/// them at the matching form.
+enum LicensingSection {
+    case license
+    case trial
+}
+
 @MainActor
 final class LicensingWindowController: NSWindowController, NSWindowDelegate {
     private static var sharedController: LicensingWindowController?
 
-    static func present() {
+    static func present(focus: LicensingSection = .license) {
         if let controller = sharedController, controller.window != nil {
             controller.showWindow(nil)
             controller.window?.makeKeyAndOrderFront(nil)
@@ -18,15 +26,15 @@ final class LicensingWindowController: NSWindowController, NSWindowDelegate {
             return
         }
 
-        let controller = LicensingWindowController()
+        let controller = LicensingWindowController(focus: focus)
         sharedController = controller
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    convenience init() {
-        let hostingController = NSHostingController(rootView: LicensingView())
+    convenience init(focus: LicensingSection = .license) {
+        let hostingController = NSHostingController(rootView: LicensingView(initialFocus: focus))
         let window = NSWindow(contentViewController: hostingController)
         window.setContentSize(NSSize(width: 480, height: 540))
         window.minSize = NSSize(width: 440, height: 420)
