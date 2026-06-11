@@ -49,6 +49,7 @@ struct TileView: View {
     @State private var windowPreviewDelayTask: Task<Void, Never>?
     @ObservedObject private var windowPreview = WindowPreviewWindowController.shared
     @ObservedObject private var tilePress = TilePressService.shared
+    @ObservedObject private var dockBadges = DockBadgeService.shared
 
     private static let finderBundleIdentifier = "com.apple.finder"
     private static let folderPopoverRetapGuardInterval: TimeInterval = 0.25
@@ -75,6 +76,7 @@ struct TileView: View {
         self._editMode = ObservedObject(wrappedValue: DockEditModeService.shared)
         self._widgetExpansion = ObservedObject(wrappedValue: WidgetExpansionWindowController.shared)
         self._dockDrag = ObservedObject(wrappedValue: DockDragService.shared)
+        self._dockBadges = ObservedObject(wrappedValue: DockBadgeService.shared)
     }
 
     private func contextActions(modifierFlags: NSEvent.ModifierFlags) -> [ContextAction] {
@@ -549,6 +551,25 @@ struct TileView: View {
         }
     }
 
+    /// Notification badge text to paint over this tile, or `nil` when the
+    /// feature is off or the app has no badge. App folders show the summed
+    /// numeric badge of the apps they contain (mirroring how the count rolls
+    /// up when running apps collapse into a folder).
+    private var badgeText: String? {
+        guard preferences.showsAppBadges else { return nil }
+        switch tile.content {
+        case .app(let app):
+            return dockBadges.badge(forBundleIdentifier: app.bundleIdentifier)
+        case .appFolder(let folder):
+            let total = folder.apps.reduce(0) { sum, app in
+                sum + (dockBadges.badge(forBundleIdentifier: app.bundleIdentifier).flatMap(Int.init) ?? 0)
+            }
+            return total > 0 ? String(total) : nil
+        case .folder, .launchpad, .startMenu, .widget, .smartStack, .spacer, .flexibleSpacer, .divider, .trash, .minimizedWindow:
+            return nil
+        }
+    }
+
     /// Effective drop shadow applied behind the tile's icon content.
     /// Returns `Color.clear` when no shadow color is set, combined
     /// with a 0 radius below, that makes `.shadow(...)` a true no-op.
@@ -590,6 +611,12 @@ struct TileView: View {
                 runningIndicator
                     .padding(runningIndicatorEdge, runningIndicatorInset)
                     .offset(x: runningIndicatorOffsetVector.width, y: runningIndicatorOffsetVector.height)
+            }
+            .overlay(alignment: .topTrailing) {
+                if let badgeText {
+                    DockBadgeView(text: badgeText)
+                        .padding(appliedTileIconPadding)
+                }
             }
             .overlay {
                 if isLockedProductPlacement {

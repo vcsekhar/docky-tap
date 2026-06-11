@@ -49,6 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         _ = LaunchpadOverlayService.shared
         AppUpdateService.shared.checkForUpdatesInBackground()
         WindowReservationService.shared.start()
+        DockBadgeService.shared.start()
 
         // Must precede TileStore.syncPreferencesFromSystemDockIfNeeded
         // below: persisted dock contents may reference external widget

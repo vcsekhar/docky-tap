@@ -1668,6 +1668,16 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// Whether running apps show their notification badge (the red count,
+    /// like Mail's unread total) on their dock tile. Read from the system
+    /// Dock via accessibility, see `DockBadgeService`.
+    var showsAppBadges: Bool {
+        didSet {
+            guard showsAppBadges != oldValue else { return }
+            defaults.set(showsAppBadges, forKey: Keys.showsAppBadges)
+        }
+    }
+
     /// Whether Docky should register itself to launch when the user logs in.
     var opensAtLogin: Bool {
         didSet {
@@ -3474,6 +3484,7 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
         static let windowDisplayTarget = "docky.windowDisplayTarget"
         static let windowSpaceBehavior = "docky.windowSpaceBehavior"
         static let autohidesWindow = "docky.autohidesWindow"
+        static let showsAppBadges = "docky.showsAppBadges"
         static let opensAtLogin = "docky.opensAtLogin"
         static let autohideWindowDelay = "docky.autohideWindowDelay"
         static let fullscreenRevealDelay = "docky.fullscreenRevealDelay"
@@ -3578,6 +3589,7 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
         static let windowDisplayTarget: DockWindowDisplayTarget = .primaryDisplay
         static let windowSpaceBehavior: DockWindowSpaceBehavior = .allSpaces
         static let autohidesWindow = false
+        static let showsAppBadges = true
         static let opensAtLogin = true
         static let autohideWindowDelay: TimeInterval = 0.5
         static let fullscreenRevealDelay: TimeInterval = 0.5
@@ -3706,6 +3718,7 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
         let storedWindowDisplayTarget = defaults.string(forKey: Keys.windowDisplayTarget)
         let storedWindowSpaceBehavior = defaults.string(forKey: Keys.windowSpaceBehavior)
         let storedAutohidesWindow = defaults.object(forKey: Keys.autohidesWindow) as? Bool
+        let storedShowsAppBadges = defaults.object(forKey: Keys.showsAppBadges) as? Bool
         let storedOpensAtLogin = defaults.object(forKey: Keys.opensAtLogin) as? Bool
         let storedAutohideWindowDelay = defaults.object(forKey: Keys.autohideWindowDelay) as? Double
         let storedFullscreenRevealDelay = defaults.object(forKey: Keys.fullscreenRevealDelay) as? Double
@@ -3828,6 +3841,7 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
         self.windowDisplayTarget = (storedWindowDisplayTarget.flatMap(DockWindowDisplayTarget.init(rawValue:)) ?? DefaultValues.windowDisplayTarget)
         self.windowSpaceBehavior = (storedWindowSpaceBehavior.flatMap(DockWindowSpaceBehavior.init(rawValue:)) ?? DefaultValues.windowSpaceBehavior)
         self.autohidesWindow = storedAutohidesWindow ?? DefaultValues.autohidesWindow
+        self.showsAppBadges = storedShowsAppBadges ?? DefaultValues.showsAppBadges
         self.opensAtLogin = storedOpensAtLogin ?? LaunchAtLoginService.shared.isEnabled
         self.autohideWindowDelay = max(storedAutohideWindowDelay ?? DefaultValues.autohideWindowDelay, 0)
         self.fullscreenRevealDelay = max(storedFullscreenRevealDelay ?? DefaultValues.fullscreenRevealDelay, 0)
@@ -4092,6 +4106,7 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
 
         // Visibility
         autohidesWindow = DefaultValues.autohidesWindow
+        showsAppBadges = DefaultValues.showsAppBadges
         autohideWindowDelay = DefaultValues.autohideWindowDelay
         hidesDuringFullscreen = DefaultValues.hidesDuringFullscreen
         fullscreenRevealDelay = DefaultValues.fullscreenRevealDelay
@@ -4147,6 +4162,7 @@ enum LaunchpadSortMode: String, CaseIterable, Codable, Identifiable {
         windowDisplayTarget = DefaultValues.windowDisplayTarget
         windowSpaceBehavior = DefaultValues.windowSpaceBehavior
         autohidesWindow = DefaultValues.autohidesWindow
+        showsAppBadges = DefaultValues.showsAppBadges
         opensAtLogin = DefaultValues.opensAtLogin
         autohideWindowDelay = DefaultValues.autohideWindowDelay
         fullscreenRevealDelay = DefaultValues.fullscreenRevealDelay

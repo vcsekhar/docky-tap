@@ -306,6 +306,16 @@ struct BehaviorSettingsView: View {
             .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 8) {
+                Toggle("Show Notification Badges", isOn: $preferences.showsAppBadges)
+                    .font(.headline)
+
+                Text("Paints the red notification count (like Mail's unread total) on running app tiles. Read from the system Dock, so it needs Accessibility permission.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 8) {
                 Toggle("Disable Recent Apps", isOn: $preferences.hidesRecentApps)
                     .font(.headline)
 
